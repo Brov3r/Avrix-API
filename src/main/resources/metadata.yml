@@ -1,0 +1,17 @@
+schema: 1
+name: "Avrix-API"
+description: "Project Zomboid API"
+id: "avrix-api"
+version: %VERSION%
+environment: "*"
+authors:
+  - "Brov3r"
+licence: "MIT"
+contacts:
+  - "https://github.com/Brov3r/Avrix-API"
+dependencies:
+  avrix-loader: ">=2.1.0"
+  project-zomboid: ">=42.20"
+entrypoint: ""
+mixins:
+  - "com.avrix.api.events.LuaEventManagerMixin"

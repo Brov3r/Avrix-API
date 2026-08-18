@@ -1,0 +1,78 @@
+import com.github.jengelman.gradle.plugins.shadow.tasks.ShadowJar
+
+plugins {
+    id 'java'
+    id 'com.gradleup.shadow' version '9.6.1'
+}
+
+group = 'com.avrix.api'
+version = '1.0.0'
+
+def customBuildPath = System.getenv('BUILD_PATH') ?: layout.buildDirectory.get().asFile
+def baseArchiveName = "${rootProject.name.capitalize()}"
+
+repositories {
+    mavenCentral()
+}
+
+dependencies {
+    // Libs
+    compileOnly(fileTree(dir: 'libs', include: '*.jar'))
+
+    // Test
+    testImplementation platform('org.junit:junit-bom:6.1.3')
+    testImplementation 'org.junit.jupiter:junit-jupiter'
+    testImplementation 'org.assertj:assertj-core:3.27.7'
+    testRuntimeOnly 'org.junit.platform:junit-platform-launcher'
+    testRuntimeOnly 'org.slf4j:slf4j-simple:2.0.17'
+}
+
+java {
+    toolchain {
+        languageVersion = JavaLanguageVersion.of(25)
+    }
+
+    withSourcesJar()
+}
+
+tasks.withType(JavaCompile).configureEach {
+    options.encoding = 'UTF-8'
+    options.release = 25
+}
+
+tasks.withType(Test).configureEach {
+    useJUnitPlatform()
+}
+
+tasks.named('processResources', ProcessResources) {
+    filteringCharset = 'UTF-8'
+
+    duplicatesStrategy = DuplicatesStrategy.INCLUDE
+    filesMatching('**/metadata.yml') {
+        filter { String line -> line.replace('%VERSION%', version.toString()) }
+    }
+}
+
+tasks.named('shadowJar', ShadowJar) {
+    archiveBaseName.set(baseArchiveName)
+    archiveClassifier.set('')
+    destinationDirectory.set(file(customBuildPath))
+
+    duplicatesStrategy = DuplicatesStrategy.INCLUDE
+    mergeServiceFiles()
+
+    exclude 'META-INF/*.SF'
+    exclude 'META-INF/*.DSA'
+    exclude 'META-INF/*.RSA'
+    exclude 'META-INF/INDEX.LIST'
+    exclude 'module-info.class'
+    exclude 'META-INF/versions/*/module-info.class'
+
+    manifest {
+        attributes(
+                'Implementation-Title': baseArchiveName.toString(),
+                'Implementation-Version': project.version.toString(),
+                'Implementation-Vendor': 'Avrix-API'
+        )
+    }
+}
