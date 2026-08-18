@@ -79,6 +79,8 @@ JAR unless your deployment model explicitly requires it.
 For loader and plugin development documentation, see the
 [Avrix Wiki](https://github.com/Brov3r/Avrix/wiki).
 
+API Wiki: [See](wiki/wiki-language.md)
+
 ## 🤝 Contributing
 
 Contributions, bug reports, and suggestions are welcome.
