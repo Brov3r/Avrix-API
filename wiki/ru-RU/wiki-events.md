@@ -151,9 +151,7 @@ public void onCustom(String payload, int level) {
 }
 
 // Вызов
-EventManager.
-
-invoke("MyMod_CustomEvent","test_data",5);
+EventManager.invoke("MyMod_CustomEvent","test_data",5);
 ```
 
 ---
