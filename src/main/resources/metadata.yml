@@ -15,5 +15,6 @@ dependencies:
 entrypoint: ""
 mixins:
   - "com.avrix.api.events.LuaEventManagerMixin"
-  - "com.avrix.api.events.GameServerMixin"
+  - "com.avrix.api.events.GameServerEventsMixin"
+  - "com.avrix.api.commands.GameServerCommandsMixin"
   - "com.avrix.api.permissions.ServerWorldDatabaseMixin"
