@@ -62,11 +62,14 @@ public final class CommandManager {
      */
     public static void unregister(String commandName) {
         if (commandName == null) return;
-        CommandRegistration removed = COMMANDS.remove(commandName.strip().toLowerCase(Locale.ROOT));
+
+        String key = commandName.strip().toLowerCase(Locale.ROOT);
+        CommandRegistration removed = COMMANDS.remove(key);
         if (removed != null) {
             for (String alias : removed.info.aliases()) {
                 COMMANDS.remove(alias.strip().toLowerCase(Locale.ROOT));
             }
+            LOGGER.info("Unregistered command '/{}' and its aliases", key);
         }
     }
 
@@ -82,6 +85,9 @@ public final class CommandManager {
             return null;
         }
 
+        LOGGER.debug("Intercepting raw command input: '{}' from connection: {}", rawInput,
+                connection != null ? connection.getIP() : "LocalConsole");
+
         List<String> tokens = CommandArgumentParser.parseTokens(rawInput);
         if (tokens.isEmpty()) {
             return null;
@@ -90,6 +96,7 @@ public final class CommandManager {
         String trigger = tokens.getFirst().toLowerCase(Locale.ROOT);
         CommandRegistration reg = COMMANDS.get(trigger);
         if (reg == null) {
+            LOGGER.debug("Command '/{}' is not registered in Avrix API. Passing through to vanilla engine.", trigger);
             return null; // Not an Avrix command -> pass through to vanilla
         }
 
@@ -127,15 +134,26 @@ public final class CommandManager {
 
         // Authorize permissions
         if (!isAuthorized(context, reg.info)) {
+            LOGGER.warn("Permission denied for command '/{}' issued by player '{}' (onlineID: {}, IP: {})",
+                    trigger, senderName, player != null ? player.getOnlineID() : -1,
+                    connection != null ? connection.getIP() : "N/A");
             return "You do not have permission to execute this command.";
         }
 
         // Execute command safely
+        long startTime = System.nanoTime();
         try {
             String result = reg.command.execute(context);
+            long elapsedMs = (System.nanoTime() - startTime) / 1_000_000L;
+
+            LOGGER.info("Command '/{}' successfully executed by '{}' in {} ms. Response: '{}'",
+                    trigger, senderName, elapsedMs, result != null ? result : "<void>");
+
             return result != null ? result : "Command executed successfully.";
         } catch (Exception ex) {
-            LOGGER.error("Error while executing command '/{}'", trigger, ex);
+            long elapsedMs = (System.nanoTime() - startTime) / 1_000_000L;
+            LOGGER.error("Execution failed for command '/{}' issued by '{}' after {} ms",
+                    trigger, senderName, elapsedMs, ex);
             return "An internal error occurred: " + ex.getMessage();
         }
     }
