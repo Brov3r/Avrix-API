@@ -131,7 +131,7 @@ public final class PermissionsManager {
         if (GameServer.server) {
             ServerWorldDatabase.instance.saveRole(role);
             Roles.save();
-            INetworkPacket.sendToAll(PacketTypes.PacketType.Roles);
+            INetworkPacket.sendToAll(PacketTypes.PacketType.Roles, new Object[0]);
         }
     }
 
@@ -425,9 +425,91 @@ public final class PermissionsManager {
             return true;
         }
 
-        // Match against native Capability enu
+        // Match against native Capability enum
         Capability capability = findStandardCapability(cleanNode);
         return capability != null && role.hasCapability(capability);
+    }
+
+    /**
+     * Evaluates whether an in-game player possesses a standard Project Zomboid {@link Capability}.
+     *
+     * @param player     the target player
+     * @param capability the native capability to check
+     * @return {@code true} if authorized
+     */
+    public static boolean hasCapability(IsoPlayer player, Capability capability) {
+        if (player == null || capability == null || capability == Capability.None) {
+            return false;
+        }
+        return Role.hasCapability(player, capability);
+    }
+
+    /**
+     * Evaluates whether an active UDP network connection possesses a standard Project Zomboid {@link Capability}.
+     *
+     * @param connection the target network connection
+     * @param capability the native capability to check
+     * @return {@code true} if authorized
+     */
+    public static boolean hasCapability(UdpConnection connection, Capability capability) {
+        if (connection == null || capability == null || capability == Capability.None) {
+            return false;
+        }
+
+        if (Role.isUsingDebugMode()) {
+            return true;
+        }
+
+        Role role = connection.getRole();
+        if (role == null) {
+            role = Roles.getDefaultForUser();
+        }
+
+        return role != null && role.hasCapability(capability);
+    }
+
+    /**
+     * Evaluates whether a {@link Role} possesses a standard Project Zomboid {@link Capability}.
+     *
+     * @param role       the target role
+     * @param capability the native capability to check
+     * @return {@code true} if authorized
+     */
+    public static boolean hasCapability(Role role, Capability capability) {
+        if (role == null || capability == null || capability == Capability.None) {
+            return false;
+        }
+
+        return role.hasCapability(capability);
+    }
+
+    /**
+     * Evaluates whether a player possesses a capability by their username.
+     *
+     * @param username   the target username
+     * @param capability the native capability
+     * @return {@code true} if authorized
+     */
+    public static boolean hasCapability(String username, Capability capability) {
+        if (username == null || username.isBlank() || capability == null || capability == Capability.None) {
+            return false;
+        }
+
+        if (Role.isUsingDebugMode()) {
+            return true;
+        }
+
+        if (GameServer.server && GameServer.Players != null) {
+            for (int i = 0; i < GameServer.Players.size(); i++) {
+                IsoPlayer p = GameServer.Players.get(i);
+                if (p != null && username.equalsIgnoreCase(p.getUsername())) {
+                    return hasCapability(p, capability);
+                }
+            }
+        }
+
+        Role role = ServerWorldDatabase.instance.getUserRoleNameByUsername(username.strip());
+        return role != null && role.hasCapability(capability);
     }
 
     /**

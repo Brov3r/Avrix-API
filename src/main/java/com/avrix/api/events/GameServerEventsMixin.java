@@ -17,7 +17,7 @@ import zombie.network.ServerWorldDatabase;
  * @author Avrix Engine Team
  */
 @CTransformer(value = GameServer.class)
-public class GameServerMixin {
+public class GameServerEventsMixin {
     /**
      * Injects into {@link GameServer#receiveClientConnect(UdpConnection, ServerWorldDatabase.LogonResult)}
      * when a client socket passes authentication and is assigned a slot.
