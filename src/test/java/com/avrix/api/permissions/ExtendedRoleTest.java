@@ -20,8 +20,6 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 /**
  * Unit tests verifying permission matching, role inheritance trees, formatting metadata,
  * immutability, and mutation guards in {@link ExtendedRole}.
- *
- * @author Avrix Engine Team
  */
 @DisplayName("ExtendedRole Permission, Inheritance, and State Management Tests")
 class ExtendedRoleTest {

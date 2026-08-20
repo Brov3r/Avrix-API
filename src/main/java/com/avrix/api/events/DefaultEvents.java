@@ -8,8 +8,6 @@ import java.util.Map;
  * Registry of standard Project Zomboid Lua events with signature documentation.
  * <p>
  * Implements {@link Event} for seamless integration with the Avrix event dispatch pipeline.
- *
- * @apiNote Sourced directly from {@code zombie.Lua.LuaEventManager}.
  */
 public enum DefaultEvents implements Event {
 

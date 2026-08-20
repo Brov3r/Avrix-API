@@ -2,8 +2,6 @@ package com.avrix.api.events;
 
 /**
  * Standard server event identifiers for type-safe subscription and documentation.
- *
- * @author Avrix Engine Team
  */
 public enum ServerEvents {
     /**
