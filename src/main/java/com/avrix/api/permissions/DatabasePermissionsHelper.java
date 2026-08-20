@@ -1,6 +1,5 @@
-package com.avrix.api.permissions.internal;
+package com.avrix.api.permissions;
 
-import com.avrix.api.permissions.ExtendedRole;
 import zombie.characters.Role;
 import zombie.debug.DebugType;
 import zombie.debug.LogSeverity;

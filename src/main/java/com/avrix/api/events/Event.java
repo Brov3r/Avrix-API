@@ -5,8 +5,6 @@ package com.avrix.api.events;
  * <p>
  * Implemented by built-in enum {@link DefaultEvents} as well as dynamic
  * custom events via {@link CustomEvent}.
- *
- * @apiNote All implementations must return a non-null, immutable event identifier.
  */
 public interface Event {
 

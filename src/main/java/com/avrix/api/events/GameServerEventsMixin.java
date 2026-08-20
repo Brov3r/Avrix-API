@@ -13,8 +13,6 @@ import zombie.network.ServerWorldDatabase;
 /**
  * ClassTransform mixin for {@link GameServer} injecting hooks into critical server-side
  * networking, player lifecycle, and command execution pipelines.
- *
- * @author Avrix Engine Team
  */
 @CTransformer(value = GameServer.class)
 public class GameServerEventsMixin {

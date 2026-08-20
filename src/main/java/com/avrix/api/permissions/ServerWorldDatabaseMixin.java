@@ -1,6 +1,5 @@
 package com.avrix.api.permissions;
 
-import com.avrix.api.permissions.internal.DatabasePermissionsHelper;
 import net.lenni0451.classtransform.annotations.CTarget;
 import net.lenni0451.classtransform.annotations.CTransformer;
 import net.lenni0451.classtransform.annotations.injection.CInject;

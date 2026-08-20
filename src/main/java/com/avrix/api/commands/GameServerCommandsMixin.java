@@ -16,8 +16,6 @@ import java.sql.SQLException;
 
 /**
  * ClassTransform mixin prioritizing Avrix custom commands over vanilla Project Zomboid commands.
- *
- * @author Avrix Engine Team
  */
 @CTransformer(value = GameServer.class)
 public class GameServerCommandsMixin {

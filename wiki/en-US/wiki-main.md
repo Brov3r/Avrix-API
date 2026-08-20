@@ -15,3 +15,4 @@ This documentation is relevant for the following versions:
 - [🏃 Game Events](wiki-events.md)
 - [💬 Chat/console commands](wiki-commands.md)
 - [🛡️ Role and Permissions](wiki-permissions.md)
+- [⚙️ Configuration Files](wiki-config.md)
