@@ -5,22 +5,21 @@ import net.lenni0451.classtransform.annotations.CTransformer;
 import net.lenni0451.classtransform.annotations.injection.CInject;
 import zombie.characters.Capability;
 import zombie.characters.Role;
+import zombie.characters.Roles;
 import zombie.debug.DebugType;
 import zombie.network.ServerWorldDatabase;
 
+import java.lang.reflect.Field;
 import java.sql.Connection;
 import java.util.ArrayList;
 
 /**
- * ClassTransform mixin for {@link ServerWorldDatabase} enabling comprehensive SQLite persistence
- * of all {@link ExtendedRole} features (permissions, inheritance trees, formatting, and metadata).
+ * ClassTransform mixin for {@link ServerWorldDatabase} enabling SQLite persistence
+ * of all {@link ExtendedRole} features.
  */
 @CTransformer(value = ServerWorldDatabase.class)
 public class ServerWorldDatabaseMixin {
 
-    /**
-     * Injects database schema verification at the end of {@link ServerWorldDatabase#create()}.
-     */
     @CInject(
             method = "create()V",
             target = @CTarget("TAIL")
@@ -28,7 +27,7 @@ public class ServerWorldDatabaseMixin {
     private void injectCreateSchema() {
         ServerWorldDatabase db = (ServerWorldDatabase) (Object) this;
         try {
-            java.lang.reflect.Field connField = ServerWorldDatabase.class.getDeclaredField("conn");
+            Field connField = ServerWorldDatabase.class.getDeclaredField("conn");
             connField.setAccessible(true);
             Connection conn = (Connection) connField.get(db);
             DatabasePermissionsHelper.initDatabaseSchema(conn);
@@ -37,11 +36,6 @@ public class ServerWorldDatabaseMixin {
         }
     }
 
-    /**
-     * Injects extended data saving at the end of {@link ServerWorldDatabase#saveRole(Role)}.
-     *
-     * @param role the role being persisted
-     */
     @CInject(
             method = "saveRole(Lzombie/characters/Role;)V",
             target = @CTarget("TAIL")
@@ -49,7 +43,7 @@ public class ServerWorldDatabaseMixin {
     private void injectSaveRoleData(Role role) {
         ServerWorldDatabase db = (ServerWorldDatabase) (Object) this;
         try {
-            java.lang.reflect.Field connField = ServerWorldDatabase.class.getDeclaredField("conn");
+            Field connField = ServerWorldDatabase.class.getDeclaredField("conn");
             connField.setAccessible(true);
             Connection conn = (Connection) connField.get(db);
             DatabasePermissionsHelper.saveCustomRoleData(conn, role);
@@ -58,12 +52,6 @@ public class ServerWorldDatabaseMixin {
         }
     }
 
-    /**
-     * Injects clean-up of extended data into {@link ServerWorldDatabase#removeRole(Role, Role)}.
-     *
-     * @param role                the role being removed
-     * @param newRoleInsteadExist the replacement role
-     */
     @CInject(
             method = "removeRole(Lzombie/characters/Role;Lzombie/characters/Role;)V",
             target = @CTarget("HEAD")
@@ -72,7 +60,7 @@ public class ServerWorldDatabaseMixin {
         if (role == null) return;
         ServerWorldDatabase db = (ServerWorldDatabase) (Object) this;
         try {
-            java.lang.reflect.Field connField = ServerWorldDatabase.class.getDeclaredField("conn");
+            Field connField = ServerWorldDatabase.class.getDeclaredField("conn");
             connField.setAccessible(true);
             Connection conn = (Connection) connField.get(db);
             DatabasePermissionsHelper.deleteCustomRoleData(conn, role.getId());
@@ -81,11 +69,6 @@ public class ServerWorldDatabaseMixin {
         }
     }
 
-    /**
-     * Injects comprehensive ExtendedRole initialization at the end of {@link ServerWorldDatabase#loadRoles(ArrayList)}.
-     *
-     * @param roles the list of loaded roles
-     */
     @CInject(
             method = "loadRoles(Ljava/util/ArrayList;)V",
             target = @CTarget("TAIL")
@@ -95,7 +78,7 @@ public class ServerWorldDatabaseMixin {
 
         ServerWorldDatabase db = (ServerWorldDatabase) (Object) this;
         try {
-            java.lang.reflect.Field connField = ServerWorldDatabase.class.getDeclaredField("conn");
+            Field connField = ServerWorldDatabase.class.getDeclaredField("conn");
             connField.setAccessible(true);
             Connection conn = (Connection) connField.get(db);
 
@@ -127,11 +110,48 @@ public class ServerWorldDatabaseMixin {
                 // Load all extended state (prefix, suffix, permissions, parents, metadata)
                 DatabasePermissionsHelper.loadCustomRoleData(conn, extendedRole);
 
-                // Replace vanilla Role with ExtendedRole
+                // Replace vanilla Role with ExtendedRole in the list
                 roles.set(i, extendedRole);
+
+                // Re-link ALL matching static default fields in Roles
+                syncRolesStaticField(standardRole.getName(), extendedRole);
             }
         } catch (Exception e) {
             DebugType.General.error("Failed to inject ExtendedRole load: " + e.getMessage());
+        }
+    }
+
+    /**
+     * Accurately updates all default role pointers in {@link Roles} according to PZ Build 42 defaults.
+     */
+    private static void syncRolesStaticField(String roleName, ExtendedRole newRole) {
+        if (roleName == null) return;
+        switch (roleName.toLowerCase()) {
+            case "admin" -> updateField("defaultForAdmin", newRole);
+            case "user" -> {
+                updateField("defaultForUser", newRole);
+                updateField("defaultForNewUser", newRole);
+            }
+            case "moderator" -> updateField("defaultForModerator", newRole);
+            case "banned" -> updateField("defaultForBanned", newRole);
+            case "priority", "priorityuser" -> updateField("defaultForPriorityUser", newRole);
+            case "observer" -> updateField("defaultForObserver", newRole);
+            case "gm" -> {
+                updateField("defaultForGM", newRole);
+                updateField("defaultForOverseer", newRole);
+            }
+            default -> {
+            }
+        }
+    }
+
+    private static void updateField(String fieldName, Role role) {
+        try {
+            Field field = Roles.class.getDeclaredField(fieldName);
+            field.setAccessible(true);
+            field.set(null, role);
+        } catch (Exception e) {
+            DebugType.General.warn("Failed to synchronize Roles." + fieldName + ": " + e.getMessage());
         }
     }
 }
