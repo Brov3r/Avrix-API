@@ -30,7 +30,7 @@ Loader to be installed and used as the runtime environment.
 ## ✅ Requirements
 
 - [Project Zomboid](https://store.steampowered.com/app/108600/Project_Zomboid/) `42.20.x+`
-- [Avrix Loader](https://github.com/Brov3r/Avrix) `2.1.x+`
+- [Avrix Loader](https://github.com/Brov3r/Avrix) `2.2.x+`
 - Java Development Kit (JDK) `25+`
 
 ## 🚀 Installation
