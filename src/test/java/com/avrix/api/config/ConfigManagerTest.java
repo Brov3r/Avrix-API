@@ -348,7 +348,7 @@ class ConfigManagerTest {
                                 startLatch.await();
                                 for (int iteration = 0; iteration < 20; iteration++) {
                                     Config<SimpleConfig> cfg = ConfigManager.loadDefaultConfig(plugin, SimpleConfig.class);
-                                    cfg.set(new SimpleConfig(plugin.getId() + "-T" + threadIndex, iteration, true));
+                                    cfg.set(new SimpleConfig(plugin.id() + "-T" + threadIndex, iteration, true));
                                     cfg.save();
                                     assertThat(cfg.get()).isNotNull();
                                 }
@@ -407,7 +407,7 @@ class ConfigManagerTest {
                     .version("1.0.0")
                     .build();
 
-            PluginData virtualPlugin = new PluginData(null, null, null, meta);
+            PluginData virtualPlugin = new PluginData(meta);
 
             Config<CommentedConfigurationNode> config = ConfigManager.load(virtualPlugin, "fallback-config.yml", CommentedConfigurationNode.class);
 
