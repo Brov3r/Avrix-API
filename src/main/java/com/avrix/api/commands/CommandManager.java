@@ -1,5 +1,7 @@
 package com.avrix.api.commands;
 
+import com.avrix.api.events.EventManager;
+import com.avrix.api.events.ServerEvents;
 import com.avrix.api.permissions.PermissionsManager;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -128,31 +130,38 @@ public final class CommandManager {
 
         // Validate CommandScope
         if (!reg.info().scope().allows(context.isPlayer())) {
-            return switch (reg.info().scope()) {
+            String scopeMsg = switch (reg.info().scope()) {
                 case CHAT -> "This command can only be executed in-game by a player.";
                 case CONSOLE -> "This command can only be executed from the server console.";
                 case BOTH -> "Command scope validation failed.";
             };
+            EventManager.invoke(ServerEvents.COMMAND_FAILURE, context, trigger, scopeMsg, null);
+            return scopeMsg;
         }
 
         // Authorize parent command permissions
         if (!isAuthorized(context, reg.info().permission(), reg.info().capability())) {
             LOGGER.warn("Access denied for command '/{}' issued by '{}' (IP: {})", trigger, senderName, senderIp);
-            return "You do not have permission to execute this command.";
+            String denialMsg = "You do not have permission to execute this command.";
+            EventManager.invoke(ServerEvents.COMMAND_FAILURE, context, trigger, denialMsg, null);
+            return denialMsg;
         }
 
         // Resolve execution target: Subcommand or Root Command
         Map<String, Subcommand> subcommands = reg.command().subcommands();
         String subKey = args.length > 0 ? args[0].toLowerCase(Locale.ROOT) : null;
         Subcommand subcommand = (subKey != null && subcommands != null) ? subcommands.get(subKey) : null;
+        String fullCommandPath = (subcommand != null) ? trigger + " " + subKey : trigger;
 
         if (subcommand != null) {
             // Validate Subcommand Permissions
             if (subcommand.permission().length > 0 || subcommand.capability().length > 0) {
                 if (!isAuthorized(context, subcommand.permission(), subcommand.capability())) {
-                    LOGGER.warn("Access denied for subcommand '/{} {}' issued by '{}' (IP: {})",
-                            trigger, subKey, senderName, senderIp);
-                    return "You do not have permission to execute this subcommand.";
+                    LOGGER.warn("Access denied for subcommand '/{}' issued by '{}' (IP: {})",
+                            fullCommandPath, senderName, senderIp);
+                    String subDenialMsg = "You do not have permission to execute this subcommand.";
+                    EventManager.invoke(ServerEvents.COMMAND_FAILURE, context, fullCommandPath, subDenialMsg, null);
+                    return subDenialMsg;
                 }
             }
 
@@ -161,7 +170,9 @@ public final class CommandManager {
                 String cdKey = senderName.toLowerCase(Locale.ROOT) + ":" + reg.primaryName() + "." + subKey;
                 long remainingMs = checkCooldown(cdKey, subcommand.cooldown(), subcommand.cooldownUnit());
                 if (remainingMs > 0) {
-                    return "This subcommand is on cooldown. Please wait " + formatDuration(remainingMs) + ".";
+                    String cdMsg = "This subcommand is on cooldown. Please wait " + formatDuration(remainingMs) + ".";
+                    EventManager.invoke(ServerEvents.COMMAND_FAILURE, context, fullCommandPath, cdMsg, null);
+                    return cdMsg;
                 }
             }
         } else {
@@ -170,15 +181,18 @@ public final class CommandManager {
                 String cdKey = senderName.toLowerCase(Locale.ROOT) + ":" + reg.primaryName();
                 long remainingMs = checkCooldown(cdKey, reg.info().cooldown(), reg.info().cooldownUnit());
                 if (remainingMs > 0) {
-                    return "This command is on cooldown. Please wait " + formatDuration(remainingMs) + ".";
+                    String cdMsg = "This command is on cooldown. Please wait " + formatDuration(remainingMs) + ".";
+                    EventManager.invoke(ServerEvents.COMMAND_FAILURE, context, fullCommandPath, cdMsg, null);
+                    return cdMsg;
                 }
             }
         }
 
-        // Safe Execution with Full Path Logging
-        String fullCommandPath = (subcommand != null) ? trigger + " " + subKey : trigger;
-        long startTime = System.nanoTime();
+        // Fire Pre-Execution Event
+        EventManager.invoke(ServerEvents.COMMAND_EXECUTE, context, fullCommandPath);
 
+        // Safe Execution
+        long startTime = System.nanoTime();
         try {
             String result;
             if (subcommand != null) {
@@ -188,26 +202,28 @@ public final class CommandManager {
             }
 
             long elapsedMs = (System.nanoTime() - startTime) / 1_000_000L;
+            String finalResponse = result != null ? result : "Command executed successfully.";
+
             LOGGER.info("Command '/{}' executed by '{}' in {} ms", fullCommandPath, senderName, elapsedMs);
 
-            return result != null ? result : "Command executed successfully.";
+            // Fire Success Event
+            EventManager.invoke(ServerEvents.COMMAND_SUCCESS, context, fullCommandPath, finalResponse, elapsedMs);
+
+            return finalResponse;
         } catch (Exception ex) {
             long elapsedMs = (System.nanoTime() - startTime) / 1_000_000L;
             LOGGER.error("Execution failed for command '/{}' issued by '{}' (IP: {}) after {} ms",
                     fullCommandPath, senderName, senderIp, elapsedMs, ex);
 
-            return "An internal error occurred during execution: " + ex.getMessage();
+            String errorMsg = "An internal error occurred during execution: " + ex.getMessage();
+
+            // Fire Failure Event
+            EventManager.invoke(ServerEvents.COMMAND_FAILURE, context, fullCommandPath, errorMsg, ex);
+
+            return errorMsg;
         }
     }
 
-    /**
-     * Checks if an action is on cooldown, or sets the next expiration time if ready.
-     *
-     * @param key      unique cooldown key
-     * @param duration cooldown duration
-     * @param unit     time unit
-     * @return remaining milliseconds, or 0 if allowed
-     */
     private static long checkCooldown(String key, long duration, TimeUnit unit) {
         long now = System.currentTimeMillis();
         Long expireTime = COOLDOWNS.get(key);
@@ -220,14 +236,6 @@ public final class CommandManager {
         return 0L;
     }
 
-    /**
-     * Evaluates security constraints and access permissions for the issuer.
-     *
-     * @param ctx          execution context
-     * @param permissions  array of required permissions (OR logic)
-     * @param capabilities array of required PZ capabilities (OR logic)
-     * @return {@code true} if allowed; {@code false} otherwise
-     */
     private static boolean isAuthorized(CommandContext ctx, String[] permissions, Capability[] capabilities) {
         if (!ctx.isPlayer()) {
             return true;
@@ -314,9 +322,6 @@ public final class CommandManager {
         return "%ds".formatted(Math.max(1, seconds));
     }
 
-    /**
-     * Immutable metadata wrapper for registered command instances.
-     */
     private record CommandRegistration(Command command, CommandInfo info, String primaryName) {
         private CommandRegistration {
             Objects.requireNonNull(command, "command cannot be null");
