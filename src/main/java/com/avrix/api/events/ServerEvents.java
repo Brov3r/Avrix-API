@@ -46,6 +46,38 @@ public enum ServerEvents implements Event {
     PLAYER_DISCONNECT("OnPlayerDisconnect"),
 
     /**
+     * Triggered when an in-game player is assigned a new role.
+     * <p><b>Parameters:</b></p>
+     * <ul>
+     *   <li>{@code IsoPlayer player} — the target player entity.</li>
+     *   <li>{@code Role oldRole} — previously assigned role.</li>
+     *   <li>{@code Role newRole} — newly assigned role.</li>
+     * </ul>
+     */
+    PLAYER_ROLE_ASSIGNED("OnPlayerRoleAssigned"),
+
+    /**
+     * Triggered when a custom permission node is granted to a player.
+     * <p><b>Parameters:</b></p>
+     * <ul>
+     *   <li>{@code String username} — target player username.</li>
+     *   <li>{@code String permissionNode} — granted permission node.</li>
+     *   <li>{@code Instant expiration} — expiration timestamp or null if permanent.</li>
+     * </ul>
+     */
+    PERMISSION_GRANTED("OnPermissionGranted"),
+
+    /**
+     * Triggered when a custom permission node is revoked from a player.
+     * <p><b>Parameters:</b></p>
+     * <ul>
+     *   <li>{@code String username} — target player username.</li>
+     *   <li>{@code String permissionNode} — revoked permission node.</li>
+     * </ul>
+     */
+    PERMISSION_REVOKED("OnPermissionRevoked"),
+
+    /**
      * Triggered immediately before an authorized command or subcommand is executed.
      * <p><b>Parameters:</b></p>
      * <ul>
