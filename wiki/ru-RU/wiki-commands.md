@@ -3,15 +3,15 @@
 ## 💬 Чат/консоль команды
 
 Система команд **Avrix** предоставляет декларативный API для создания серверных и внутриигровых команд. Она включает
-автоматический лексический анализ аргументов с поддержкой кавычек, разграничение областей выполнения через
-`CommandScope`, а также интеграцию с подсистемой прав доступа `PermissionsManager` и нативными возможностями
-`Capability` Project Zomboid.
+автоматический лексический анализ аргументов с поддержкой кавычек, дерево подкоманд (`Subcommand`), независимые таймеры
+перезарядки (`Cooldowns`), типобезопасный доступ к аргументам в `CommandContext`, а также бесшовную интеграцию с
+`PermissionsManager` и нативными `Capability` Project Zomboid.
 
 ---
 
-### Создание команды
+### Создание базовой команды
 
-Для создания команды реализуйте функциональный интерфейс `Command` и добавьте аннотацию `@CommandInfo`.
+Для создания команды реализуйте интерфейс `Command` и добавьте аннотацию `@CommandInfo`.
 
 ```java
 package com.example.plugin.commands;
@@ -22,32 +22,108 @@ import com.avrix.api.commands.CommandInfo;
 import com.avrix.api.commands.CommandScope;
 import zombie.characters.IsoPlayer;
 
+import java.util.concurrent.TimeUnit;
+
 @CommandInfo(
         name = "heal",
         aliases = {"healme", "hp"},
         description = "Полностью восстанавливает здоровье игрока",
         usage = "/heal [\"имя игрока\"]",
         permission = {"avrix.commands.heal", "avrix.admin.*"},
+        cooldown = 10,
+        cooldownUnit = TimeUnit.SECONDS,
         scope = CommandScope.BOTH
 )
 public class HealCommand implements Command {
 
     @Override
     public String execute(CommandContext context) {
-        // Если передан аргумент с никнеймом цели
-        if (context.args().length > 0) {
-            String targetName = context.args();
-            return "Игрок " + targetName + " успешно исцелен.";
+        // Реализация команды ...
+        return "Здоровье игрока " + target.getUsername() + " успешно восстановлено!";
+    }
+}
+```
+
+---
+
+### Создание иерархических подкоманд
+
+Команды могут делегировать выполнение дочерним подкомандам через метод `subcommands()`. Каждая подкоманда способна
+определять собственные права доступа, нативные `Capability` и индивидуальные кулдауны.
+
+```java
+package com.example.plugin.commands;
+
+import com.avrix.api.commands.*;
+import zombie.characters.IsoPlayer;
+
+import java.util.Map;
+import java.util.concurrent.TimeUnit;
+
+@CommandInfo(
+        name = "kit",
+        description = "Получение наборов предметов",
+        usage = "/kit <starter|vip>",
+        permission = {"kit.use"},
+        scope = CommandScope.CHAT
+)
+public class KitCommand implements Command {
+
+    @Override
+    public Map<String, Subcommand> subcommands() {
+        return Map.of(
+                "starter", new StarterKitSubcommand(),
+                "vip", new VipKitSubcommand()
+        );
+    }
+
+    @Override
+    public String execute(CommandContext context) {
+        return "Доступные наборы: starter, vip. Использование: /kit <название>";
+    }
+
+    private static class StarterKitSubcommand implements Subcommand {
+        @Override
+        public String[] permission() {
+            return new String[]{"kit.starter"};
         }
 
-        // Если команда вызвана игроком для себя
-        if (context.isPlayer()) {
-            IsoPlayer player = context.player();
-            player.getBodyDamage().RestoreToFullHealth();
-            return "Вы успешно восстановили свое здоровье!";
+        @Override
+        public long cooldown() {
+            return 1;
         }
 
-        return "Использование из консоли: /heal <\"имя игрока\">";
+        @Override
+        public TimeUnit cooldownUnit() {
+            return TimeUnit.HOURS;
+        }
+
+        @Override
+        public String execute(CommandContext context) {
+            return "Стартовый набор успешно получен!";
+        }
+    }
+
+    private static class VipKitSubcommand implements Subcommand {
+        @Override
+        public String[] permission() {
+            return new String[]{"kit.vip"};
+        }
+
+        @Override
+        public long cooldown() {
+            return 24;
+        }
+
+        @Override
+        public TimeUnit cooldownUnit() {
+            return TimeUnit.HOURS;
+        }
+
+        @Override
+        public String execute(CommandContext context) {
+            return "VIP набор успешно получен!";
+        }
     }
 }
 ```
@@ -56,15 +132,17 @@ public class HealCommand implements Command {
 
 ### Параметры аннотации `@CommandInfo`
 
-| Параметр      | Тип            | По умолчанию        | Описание                                                                                             |
-|:--------------|:---------------|:--------------------|:-----------------------------------------------------------------------------------------------------|
-| `name`        | `String`       | *(Обязательно)*     | Основной триггер вызова команды (без начального слэша).                                              |
-| `aliases`     | `String[]`     | `{}`                | Дополнительные синонимы и сокращения для вызова команды.                                             |
-| `description` | `String`       | `""`                | Человекочитаемое описание назначения команды.                                                        |
-| `usage`       | `String`       | `""`                | Подсказка по синтаксису и ожидаемым параметрам.                                                      |
-| `permission`  | `String[]`     | `{}`                | Строковые узлы прав (`permissions`). Доступ разрешен, если у отправителя есть **хотя бы один** узел. |
-| `capability`  | `Capability[]` | `{}`                | Нативные capabilities Project Zomboid, необходимые для выполнения.                                   |
-| `scope`       | `CommandScope` | `CommandScope.BOTH` | Область допустимого исполнения: только чат (`CHAT`), только консоль (`CONSOLE`) или везде (`BOTH`).  |
+| Параметр       | Тип            | По умолчанию        | Описание                                                                                             |
+|:---------------|:---------------|:--------------------|:-----------------------------------------------------------------------------------------------------|
+| `name`         | `String`       | *(Обязательно)*     | Основной триггер вызова команды (без начального слэша).                                              |
+| `aliases`      | `String[]`     | `{}`                | Дополнительные синонимы и сокращения для вызова команды.                                             |
+| `description`  | `String`       | `""`                | Человекочитаемое описание назначения команды.                                                        |
+| `usage`        | `String`       | `""`                | Подсказка по синтаксису и ожидаемым параметрам.                                                      |
+| `permission`   | `String[]`     | `{}`                | Строковые узлы прав (`permissions`). Доступ разрешен, если у отправителя есть **хотя бы один** узел. |
+| `capability`   | `Capability[]` | `{}`                | Нативные capabilities Project Zomboid, необходимые для выполнения.                                   |
+| `cooldown`     | `long`         | `0`                 | Длительность задержки между повторными вызовами команды игроком.                                     |
+| `cooldownUnit` | `TimeUnit`     | `TimeUnit.SECONDS`  | Единица времени для параметра `cooldown`.                                                            |
+| `scope`        | `CommandScope` | `CommandScope.BOTH` | Область допустимого исполнения: только чат (`CHAT`), только консоль (`CONSOLE`) или везде (`BOTH`).  |
 
 ---
 
@@ -89,8 +167,8 @@ public enum CommandScope {
 
 ### Контекст команды (`CommandContext`)
 
-При вызове метода `execute` передается неизменяемый объект `CommandContext`, содержащий всю метаинформацию о текущем
-запросе:
+При вызове метода `execute` передается неизменяемый объект `CommandContext`, предоставляющий типобезопасные методы
+извлечения параметров без необходимости ручной обработки исключений:
 
 ```java
 public record CommandContext(
@@ -100,11 +178,31 @@ public record CommandContext(
         String rawCommand,        // Исходная строка ввода целиком
         String[] args             // Массив очищенных аргументов (кавычки удалены)
 ) {
-    public boolean isPlayer();             // true, если команда вызвана онлайн-игроком
+    public boolean isPlayer();                             // true, если команда вызвана онлайн-игроком
 
-    public Optional<IsoPlayer> getPlayer(); // Безопасное получение сущности игрока
+    public Optional<IsoPlayer> getPlayer();                // Безопасное получение сущности отправителя
 
-    public Optional<String> getArg(int i); // Получение аргумента по индексу с защитой от IndexOutOfBounds
+    public int length();                                   // Количество переданных аргументов
+
+    public Optional<String> getArg(int index);             // Получение аргумента в Optional
+
+    public String getString(int index, String fallback);   // Строка с дефолтным значением
+
+    public Optional<Integer> getInt(int index);            // Парсинг integer
+
+    public int getInt(int index, int fallback);            // Парсинг integer с дефолтным значением
+
+    public Optional<Double> getDouble(int index);          // Парсинг double
+
+    public double getDouble(int index, double fallback);   // Парсинг double с дефолтным значением
+
+    public Optional<Boolean> getBoolean(int index);        // Парсинг boolean (true/false, 1/0, yes/no)
+
+    public boolean getBoolean(int index, boolean fallback);// Парсинг boolean с дефолтным значением
+
+    public String joinArgs(int startIndex);                // Склейка всех оставшихся аргументов через пробел
+
+    public CommandContext subContext(int shift);           // Создание дочернего контекста со сдвигом аргументов
 }
 ```
 
@@ -112,8 +210,8 @@ public record CommandContext(
 
 ### Парсер многословных аргументов и кавычек
 
-Встроенный лексер `CommandManager` автоматически объединяет слова в кавычках (`""` или `''`) в единый аргумент и очищает
-их от внешних символов обрамления:
+Встроенный лексер `CommandArgumentParser` автоматически объединяет слова в кавычках (`""` или `''`) в единый аргумент и
+очищает их от внешних символов обрамления:
 
 | Введенная команда                       | `context.args()[0]` | `context.args()[1]` | `context.args()[2]` |
 |:----------------------------------------|:--------------------|:--------------------|:--------------------|
@@ -124,21 +222,22 @@ public record CommandContext(
 
 ---
 
-### Проверка прав и авторизация
+### Проверка прав и кулдауны
 
-Права проверяются автоматически до вызова метода `execute()`:
-
-1. **Серверная консоль** всегда обладает абсолютным приоритетом и обходит любые проверки прав.
-2. **Игроки** проверяются через `PermissionsManager`:
-    - Поддерживаются префиксы и маски (`avrix.commands.*`, `*`).
-    - Поддерживается наследование ролей (`ExtendedRole`).
-    - Поддерживаются персональные права пользователей.
+1. **Приоритет консоли:** Серверная консоль всегда обладает root-доступом, обходит любые ограничения прав и игнорирует
+   кулдауны.
+2. **Проверка прав (OR-логика):** Доступ разрешен, если игрок обладает хотя бы одним строковым правом (`permission`) или
+   нативным свойством (`capability`).
+3. **Иерархия подкоманд (AND-логика):** Для вызова `/kit starter` игрок обязан обладать как правом корневой команды (
+   `kit.use`), так и правом конкретной ветки (`kit.starter`).
+4. **Изоляция кулдаунов:** Таймеры перезарядки вычисляются раздельно для каждого игрока и сохраняются независимо для
+   корневых команд и каждой отдельной подкоманды.
 
 ---
 
 ### Регистрация и удаление команд
 
-Регистрация выполняется через статический класс `CommandManager` в точке входа вашего плагина (`onInitialize`):
+Регистрация выполняется через статический класс `CommandManager` в точке инициализации плагина:
 
 ```java
 package com.example.plugin;
@@ -147,17 +246,17 @@ import com.avrix.api.commands.CommandManager;
 import com.avrix.plugins.Plugin;
 import com.avrix.plugins.PluginData;
 import com.example.plugin.commands.HealCommand;
-import com.example.plugin.commands.TeleportCommand;
+import com.example.plugin.commands.KitCommand;
 
 public class ExamplePlugin implements Plugin {
 
     @Override
     public void onInitialize(PluginData pluginData) {
-        // Регистрация экземпляров команд
+        // Регистрация команд
         CommandManager.register(new HealCommand());
-        CommandManager.register(new TeleportCommand());
+        CommandManager.register(new KitCommand());
 
-        // Отмена регистрации команды, например, при выгрузке
+        // Отмена регистрации команды при выгрузке/перезагрузке
         // CommandManager.unregister("heal");
     }
 }

@@ -10,7 +10,7 @@ licence: "MIT"
 contacts:
   - "https://github.com/Brov3r/Avrix-API"
 dependencies:
-  avrix-loader: ">=2.1.0"
+  avrix-loader: ">=2.2.0"
   project-zomboid: ">=42.20"
 entrypoint: ""
 mixins:

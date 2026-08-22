@@ -7,26 +7,33 @@ import zombie.characters.Capability;
 import zombie.characters.IsoPlayer;
 import zombie.core.raknet.UdpConnection;
 
-import java.util.*;
+import java.util.Arrays;
+import java.util.Locale;
+import java.util.Map;
+import java.util.Objects;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.TimeUnit;
 
 /**
- * Central thread-safe command manager for registering, parsing, authenticating, and dispatching commands.
+ * Thread-safe command management and dispatching engine.
  */
 public final class CommandManager {
-    private static final Logger LOGGER = LoggerFactory.getLogger(CommandManager.class);
 
-    private static final Map<String, CommandRegistration> COMMANDS = new ConcurrentHashMap<>();
+    private static final Logger LOGGER = LoggerFactory.getLogger(CommandManager.class);
+    private static final Map<String, CommandRegistration> COMMAND_REGISTRY = new ConcurrentHashMap<>();
+    private static final Map<String, Long> COOLDOWNS = new ConcurrentHashMap<>();
 
     private CommandManager() {
-        throw new UnsupportedOperationException("Utility class");
+        throw new UnsupportedOperationException("Utility class cannot be instantiated");
     }
 
     /**
-     * Registers a command instance.
+     * Registers a command into the dispatch registry.
      *
-     * @param command the command implementation
-     * @throws IllegalArgumentException if missing {@link CommandInfo} or command name is blank
+     * @param command the command instance to register
+     * @throws NullPointerException     if {@code command} is null
+     * @throws IllegalArgumentException if {@link CommandInfo} is missing or command name is blank
+     * @apiNote Replaces existing mapping if collision occurs and logs a warning.
      */
     public static void register(Command command) {
         Objects.requireNonNull(command, "Command instance cannot be null");
@@ -37,165 +44,284 @@ public final class CommandManager {
             throw new IllegalArgumentException("Class '%s' is missing @CommandInfo annotation".formatted(clazz.getName()));
         }
 
-        String primaryName = info.name().strip().toLowerCase(Locale.ROOT);
+        String primaryName = normalize(info.name());
         if (primaryName.isEmpty()) {
-            throw new IllegalArgumentException("Command name cannot be empty in class: " + clazz.getName());
+            throw new IllegalArgumentException("Primary command name cannot be blank in class: " + clazz.getName());
         }
 
-        CommandRegistration registration = new CommandRegistration(command, info);
-        COMMANDS.put(primaryName, registration);
+        CommandRegistration registration = new CommandRegistration(command, info, primaryName);
+        COMMAND_REGISTRY.put(primaryName, registration);
 
         for (String alias : info.aliases()) {
-            if (alias != null && !alias.isBlank()) {
-                COMMANDS.put(alias.strip().toLowerCase(Locale.ROOT), registration);
+            String normalizedAlias = normalize(alias);
+            if (!normalizedAlias.isEmpty()) {
+                COMMAND_REGISTRY.put(normalizedAlias, registration);
             }
         }
 
-        LOGGER.info("Registered command '/{}' (scope: {}, aliases: {})",
-                primaryName, info.scope(), Arrays.toString(info.aliases()));
+        if (info.cooldown() > 0) {
+            LOGGER.info("Registered command '/{}' [scope: {}, cooldown: {} {}, aliases: {}]",
+                    primaryName, info.scope(), info.cooldown(), info.cooldownUnit(), Arrays.toString(info.aliases()));
+        } else {
+            LOGGER.info("Registered command '/{}' [scope: {}, aliases: {}]",
+                    primaryName, info.scope(), Arrays.toString(info.aliases()));
+        }
     }
 
     /**
-     * Unregisters a command by name.
+     * Unregisters a command and all of its associated aliases.
      *
-     * @param commandName the command name
+     * @param commandIdentifier primary name or alias of the command to unregister
      */
-    public static void unregister(String commandName) {
-        if (commandName == null) return;
+    public static void unregister(String commandIdentifier) {
+        if (commandIdentifier == null || commandIdentifier.isBlank()) {
+            return;
+        }
 
-        String key = commandName.strip().toLowerCase(Locale.ROOT);
-        CommandRegistration removed = COMMANDS.remove(key);
+        String key = normalize(commandIdentifier);
+        CommandRegistration removed = COMMAND_REGISTRY.remove(key);
+
         if (removed != null) {
-            for (String alias : removed.info.aliases()) {
-                COMMANDS.remove(alias.strip().toLowerCase(Locale.ROOT));
+            COMMAND_REGISTRY.remove(removed.primaryName());
+            for (String alias : removed.info().aliases()) {
+                COMMAND_REGISTRY.remove(normalize(alias));
             }
-            LOGGER.info("Unregistered command '/{}' and its aliases", key);
+            LOGGER.info("Successfully unregistered command '/{}' and all associated aliases", removed.primaryName());
         }
     }
 
     /**
-     * Dispatches a raw command input string.
+     * Dispatches a raw console or in-game command string.
      *
-     * @param rawInput   the command line input (e.g. {@code /heal "Miss Bekket"})
-     * @param connection the player connection, or null if server console
-     * @return the execution response string if intercepted, or {@code null} to pass through to vanilla Project Zomboid
+     * @param rawInput   the complete raw input string (e.g. {@code "/heal \"Player Name\""})
+     * @param connection the remote client UDP connection, or {@code null} if dispatched from the server console
+     * @return the command output message, or {@code null} if the command is not registered in Avrix (pass-through)
      */
     public static String handleCommand(String rawInput, UdpConnection connection) {
         if (rawInput == null || rawInput.isBlank()) {
             return null;
         }
 
-        LOGGER.debug("Intercepting raw command input: '{}' from connection: {}", rawInput,
-                connection != null ? connection.getIP() : "LocalConsole");
-
-        List<String> tokens = CommandArgumentParser.parseTokens(rawInput);
+        var tokens = CommandArgumentParser.parseTokens(rawInput);
         if (tokens.isEmpty()) {
             return null;
         }
 
-        String trigger = tokens.getFirst().toLowerCase(Locale.ROOT);
-        CommandRegistration reg = COMMANDS.get(trigger);
+        String rawTrigger = tokens.getFirst();
+        String trigger = normalize(rawTrigger);
+
+        CommandRegistration reg = COMMAND_REGISTRY.get(trigger);
         if (reg == null) {
-            LOGGER.debug("Command '/{}' is not registered in Avrix API. Passing through to vanilla engine.", trigger);
-            return null; // Not an Avrix command -> pass through to vanilla
+            LOGGER.debug("Command '/{}' is not registered in Avrix API. Delegating to vanilla engine.", trigger);
+            return null;
         }
 
-        // Split args (all tokens after trigger)
         String[] args = tokens.size() > 1
                 ? tokens.subList(1, tokens.size()).toArray(String[]::new)
                 : new String[0];
 
-        // Resolve sender player
-        IsoPlayer player = null;
-        String senderName = "ServerConsole";
-
-        if (connection != null) {
-            senderName = connection.getUserName();
-            if (connection.players != null) {
-                for (IsoPlayer p : connection.players) {
-                    if (p != null) {
-                        player = p;
-                        break;
-                    }
-                }
-            }
-        }
+        IsoPlayer player = resolvePlayer(connection);
+        String senderName = resolveSenderName(connection, player);
+        String senderIp = connection != null ? connection.getIP() : "Console";
 
         CommandContext context = new CommandContext(senderName, player, connection, rawInput, args);
 
         // Validate CommandScope
-        if (!reg.info.scope().allows(context.isPlayer())) {
-            return switch (reg.info.scope()) {
+        if (!reg.info().scope().allows(context.isPlayer())) {
+            return switch (reg.info().scope()) {
                 case CHAT -> "This command can only be executed in-game by a player.";
                 case CONSOLE -> "This command can only be executed from the server console.";
-                case BOTH -> "";
+                case BOTH -> "Command scope validation failed.";
             };
         }
 
-        // Authorize permissions
-        if (!isAuthorized(context, reg.info)) {
-            LOGGER.warn("Permission denied for command '/{}' issued by player '{}' (onlineID: {}, IP: {})",
-                    trigger, senderName, player != null ? player.getOnlineID() : -1,
-                    connection != null ? connection.getIP() : "N/A");
+        // Authorize parent command permissions
+        if (!isAuthorized(context, reg.info().permission(), reg.info().capability())) {
+            LOGGER.warn("Access denied for command '/{}' issued by '{}' (IP: {})", trigger, senderName, senderIp);
             return "You do not have permission to execute this command.";
         }
 
-        // Execute command safely
-        long startTime = System.nanoTime();
-        try {
-            String result = reg.command.execute(context);
-            long elapsedMs = (System.nanoTime() - startTime) / 1_000_000L;
+        // Resolve execution target: Subcommand or Root Command
+        Map<String, Subcommand> subcommands = reg.command().subcommands();
+        String subKey = args.length > 0 ? args[0].toLowerCase(Locale.ROOT) : null;
+        Subcommand subcommand = (subKey != null && subcommands != null) ? subcommands.get(subKey) : null;
 
-            LOGGER.info("Command '/{}' successfully executed by '{}' in {} ms. Response: '{}'",
-                    trigger, senderName, elapsedMs, result != null ? result : "<void>");
+        if (subcommand != null) {
+            // Validate Subcommand Permissions
+            if (subcommand.permission().length > 0 || subcommand.capability().length > 0) {
+                if (!isAuthorized(context, subcommand.permission(), subcommand.capability())) {
+                    LOGGER.warn("Access denied for subcommand '/{} {}' issued by '{}' (IP: {})",
+                            trigger, subKey, senderName, senderIp);
+                    return "You do not have permission to execute this subcommand.";
+                }
+            }
+
+            // Validate Subcommand Cooldown
+            if (context.isPlayer() && subcommand.cooldown() > 0) {
+                String cdKey = senderName.toLowerCase(Locale.ROOT) + ":" + reg.primaryName() + "." + subKey;
+                long remainingMs = checkCooldown(cdKey, subcommand.cooldown(), subcommand.cooldownUnit());
+                if (remainingMs > 0) {
+                    return "This subcommand is on cooldown. Please wait " + formatDuration(remainingMs) + ".";
+                }
+            }
+        } else {
+            // Validate Root Command Cooldown
+            if (context.isPlayer() && reg.info().cooldown() > 0) {
+                String cdKey = senderName.toLowerCase(Locale.ROOT) + ":" + reg.primaryName();
+                long remainingMs = checkCooldown(cdKey, reg.info().cooldown(), reg.info().cooldownUnit());
+                if (remainingMs > 0) {
+                    return "This command is on cooldown. Please wait " + formatDuration(remainingMs) + ".";
+                }
+            }
+        }
+
+        // Safe Execution with Full Path Logging
+        String fullCommandPath = (subcommand != null) ? trigger + " " + subKey : trigger;
+        long startTime = System.nanoTime();
+
+        try {
+            String result;
+            if (subcommand != null) {
+                result = subcommand.execute(context.subContext(1));
+            } else {
+                result = reg.command().execute(context);
+            }
+
+            long elapsedMs = (System.nanoTime() - startTime) / 1_000_000L;
+            LOGGER.info("Command '/{}' executed by '{}' in {} ms", fullCommandPath, senderName, elapsedMs);
 
             return result != null ? result : "Command executed successfully.";
         } catch (Exception ex) {
             long elapsedMs = (System.nanoTime() - startTime) / 1_000_000L;
-            LOGGER.error("Execution failed for command '/{}' issued by '{}' after {} ms",
-                    trigger, senderName, elapsedMs, ex);
-            return "An internal error occurred: " + ex.getMessage();
+            LOGGER.error("Execution failed for command '/{}' issued by '{}' (IP: {}) after {} ms",
+                    fullCommandPath, senderName, senderIp, elapsedMs, ex);
+
+            return "An internal error occurred during execution: " + ex.getMessage();
         }
     }
 
     /**
-     * Evaluates whether the issuer has at least one of the required permissions or capabilities.
+     * Checks if an action is on cooldown, or sets the next expiration time if ready.
+     *
+     * @param key      unique cooldown key
+     * @param duration cooldown duration
+     * @param unit     time unit
+     * @return remaining milliseconds, or 0 if allowed
      */
-    private static boolean isAuthorized(CommandContext ctx, CommandInfo info) {
-        // Server console always has root access
+    private static long checkCooldown(String key, long duration, TimeUnit unit) {
+        long now = System.currentTimeMillis();
+        Long expireTime = COOLDOWNS.get(key);
+
+        if (expireTime != null && now < expireTime) {
+            return expireTime - now;
+        }
+
+        COOLDOWNS.put(key, now + unit.toMillis(duration));
+        return 0L;
+    }
+
+    /**
+     * Evaluates security constraints and access permissions for the issuer.
+     *
+     * @param ctx          execution context
+     * @param permissions  array of required permissions (OR logic)
+     * @param capabilities array of required PZ capabilities (OR logic)
+     * @return {@code true} if allowed; {@code false} otherwise
+     */
+    private static boolean isAuthorized(CommandContext ctx, String[] permissions, Capability[] capabilities) {
         if (!ctx.isPlayer()) {
             return true;
         }
 
         IsoPlayer player = ctx.player();
-
-        // Custom string permission check
-        if (info.permission().length > 0) {
-            for (String permNode : info.permission()) {
-                if (permNode != null && !permNode.isBlank()) {
-                    if (PermissionsManager.hasPermission(player, permNode)) {
-                        return true;
-                    }
-                }
-            }
+        if (player == null) {
             return false;
         }
 
-        // Standard Capability check
-        if (info.capability().length > 0) {
-            for (Capability cap : info.capability()) {
-                if (cap != null && cap != Capability.None) {
-                    if (PermissionsManager.hasCapability(player, cap)) {
-                        return true;
-                    }
-                }
-            }
-            return false;
+        boolean hasExplicitPermConfig = permissions != null && permissions.length > 0;
+        boolean hasExplicitCapConfig = capabilities != null && capabilities.length > 0;
+
+        if (!hasExplicitPermConfig && !hasExplicitCapConfig) {
+            return true;
         }
 
-        return true; // No permission required
+        if (hasExplicitPermConfig) {
+            for (String perm : permissions) {
+                if (perm != null && !perm.isBlank() && PermissionsManager.hasPermission(player, perm)) {
+                    return true;
+                }
+            }
+        }
+
+        if (hasExplicitCapConfig) {
+            for (Capability cap : capabilities) {
+                if (cap != null && cap != Capability.None && PermissionsManager.hasCapability(player, cap)) {
+                    return true;
+                }
+            }
+        }
+
+        return false;
     }
 
-    private record CommandRegistration(Command command, CommandInfo info) {
+    private static IsoPlayer resolvePlayer(UdpConnection connection) {
+        if (connection == null || connection.players == null) {
+            return null;
+        }
+        for (IsoPlayer p : connection.players) {
+            if (p != null) {
+                return p;
+            }
+        }
+        return null;
+    }
+
+    private static String resolveSenderName(UdpConnection connection, IsoPlayer player) {
+        if (connection == null) {
+            return "ServerConsole";
+        }
+        if (connection.getUserName() != null && !connection.getUserName().isBlank()) {
+            return connection.getUserName();
+        }
+        if (player != null && player.getUsername() != null) {
+            return player.getUsername();
+        }
+        return "UnknownPlayer";
+    }
+
+    private static String normalize(String input) {
+        if (input == null) {
+            return "";
+        }
+        String stripped = input.strip();
+        if (stripped.startsWith("/")) {
+            stripped = stripped.substring(1).stripLeading();
+        }
+        return stripped.toLowerCase(Locale.ROOT);
+    }
+
+    private static String formatDuration(long millis) {
+        long seconds = (millis / 1000) % 60;
+        long minutes = (millis / (1000 * 60)) % 60;
+        long hours = (millis / (1000 * 60 * 60));
+
+        if (hours > 0) {
+            return "%dh %dm".formatted(hours, minutes);
+        }
+        if (minutes > 0) {
+            return "%dm %ds".formatted(minutes, seconds);
+        }
+        return "%ds".formatted(Math.max(1, seconds));
+    }
+
+    /**
+     * Immutable metadata wrapper for registered command instances.
+     */
+    private record CommandRegistration(Command command, CommandInfo info, String primaryName) {
+        private CommandRegistration {
+            Objects.requireNonNull(command, "command cannot be null");
+            Objects.requireNonNull(info, "info cannot be null");
+            Objects.requireNonNull(primaryName, "primaryName cannot be null");
+        }
     }
 }

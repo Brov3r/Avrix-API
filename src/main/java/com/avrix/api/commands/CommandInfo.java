@@ -3,9 +3,10 @@ package com.avrix.api.commands;
 import zombie.characters.Capability;
 
 import java.lang.annotation.*;
+import java.util.concurrent.TimeUnit;
 
 /**
- * Declares command metadata, triggers, usage syntax, execution scope, and authorization rules.
+ * Declares command metadata, triggers, usage syntax, execution scope, cooldowns, and authorization rules.
  */
 @Documented
 @Target(ElementType.TYPE)
@@ -42,7 +43,6 @@ public @interface CommandInfo {
 
     /**
      * Custom string permission nodes required to execute this command (e.g. {@code {"avrix.commands.heal"}}).
-     * <p>By default, if multiple nodes are specified, possessing <b>any</b> of them grants access (OR logic).</p>
      *
      * @return array of permission strings
      */
@@ -61,4 +61,18 @@ public @interface CommandInfo {
      * @return the execution scope
      */
     CommandScope scope() default CommandScope.BOTH;
+
+    /**
+     * Cooldown duration between executions for players.
+     *
+     * @return cooldown amount (0 for no cooldown)
+     */
+    long cooldown() default 0;
+
+    /**
+     * Time unit for the cooldown duration.
+     *
+     * @return time unit (defaults to SECONDS)
+     */
+    TimeUnit cooldownUnit() default TimeUnit.SECONDS;
 }

@@ -73,7 +73,7 @@ public final class ConfigManager {
         Objects.requireNonNull(fileName, "FileName cannot be null");
         Objects.requireNonNull(type, "Config type class cannot be null");
 
-        final String pluginId = data.getId();
+        final String pluginId = data.id();
         final String cacheKey = (pluginId + ":" + fileName).toLowerCase();
 
         return (Config<T>) CACHE.computeIfAbsent(cacheKey, _ -> {
@@ -155,13 +155,13 @@ public final class ConfigManager {
                 // Check ONLY within this plugin's physical JAR
                 final File jarFile = jarFileOpt.get();
                 if (jarFile.exists() && extractFromJar(jarFile, cleanResource, targetPath)) {
-                    LOGGER.debug("Extracted default resource [{}] from JAR for plugin [{}]", cleanResource, data.getId());
+                    LOGGER.debug("Extracted default resource [{}] from JAR for plugin [{}]", cleanResource, data.id());
                     return;
                 }
 
                 // If not found in the plugin's own JAR, create an empty config file
                 Files.createFile(targetPath);
-                LOGGER.debug("Resource [{}] not found in [{}] JAR. Created empty config at [{}]", cleanResource, data.getId(), targetPath);
+                LOGGER.debug("Resource [{}] not found in [{}] JAR. Created empty config at [{}]", cleanResource, data.id(), targetPath);
                 return;
             }
 
@@ -173,13 +173,13 @@ public final class ConfigManager {
             try (final InputStream in = cl.getResourceAsStream(cleanResource)) {
                 if (in != null) {
                     Files.copy(in, targetPath, StandardCopyOption.REPLACE_EXISTING);
-                    LOGGER.debug("Extracted [{}] from ClassLoader for virtual plugin [{}]", cleanResource, data.getId());
+                    LOGGER.debug("Extracted [{}] from ClassLoader for virtual plugin [{}]", cleanResource, data.id());
                     return;
                 }
             }
 
             Files.createFile(targetPath);
-            LOGGER.debug("Created empty config file at [{}] for virtual plugin [{}]", targetPath, data.getId());
+            LOGGER.debug("Created empty config file at [{}] for virtual plugin [{}]", targetPath, data.id());
 
         } catch (final IOException ex) {
             throw new RuntimeException("Failed to prepare config file at " + targetPath, ex);

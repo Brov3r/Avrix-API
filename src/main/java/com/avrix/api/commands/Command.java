@@ -1,17 +1,29 @@
 package com.avrix.api.commands;
 
+import java.util.Collections;
+import java.util.Map;
+
 /**
- * Functional contract representing an executable console/chat command.
- * Classes implementing this interface MUST be annotated with {@link CommandInfo}.
+ * Base interface for all Avrix commands with optional subcommand support.
  */
 @FunctionalInterface
 public interface Command {
 
     /**
-     * Executes the command logic with the supplied context.
+     * Executes the root command logic.
      *
-     * @param context the execution context
-     * @return the result message to be returned to the server pipeline and sender
+     * @param context execution context
+     * @return message string returned to sender, or null if void
+     * @throws Exception if an error occurs during execution
      */
-    String execute(CommandContext context);
+    String execute(CommandContext context) throws Exception;
+
+    /**
+     * Returns mapped subcommands for this command.
+     *
+     * @return map of subcommand names to implementations
+     */
+    default Map<String, Subcommand> subcommands() {
+        return Collections.emptyMap();
+    }
 }
