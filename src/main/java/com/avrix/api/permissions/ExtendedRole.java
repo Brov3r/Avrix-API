@@ -1,5 +1,6 @@
 package com.avrix.api.permissions;
 
+import zombie.characters.Capability;
 import zombie.characters.Role;
 import zombie.characters.Roles;
 import zombie.core.Color;
@@ -41,17 +42,17 @@ public class ExtendedRole extends Role {
     private final Map<String, String> metadata;
 
     /**
-     * Visual chat/display prefix (e.g., {@code "&c[Admin]&f "}).
+     * Visual chat/display prefix (e.g., {@code "[Admin] "}).
      */
     private volatile String prefix = "";
 
     /**
-     * Visual chat/display suffix (e.g., {@code " &6★"}).
+     * Visual chat/display suffix (e.g., {@code " ★"}).
      */
     private volatile String suffix = "";
 
     /**
-     * Creates a new extended role with the specified unique name.
+     * Constructs a new extended role with the specified unique name and default white color.
      *
      * @param name the unique name of this role
      * @throws NullPointerException     if {@code name} is null
@@ -62,7 +63,7 @@ public class ExtendedRole extends Role {
     }
 
     /**
-     * Creates a new extended role with full display metadata.
+     * Constructs a new extended role with full display metadata.
      *
      * @param name        the unique name of this role
      * @param description a human-readable role description
@@ -89,6 +90,8 @@ public class ExtendedRole extends Role {
      *
      * @param name the raw role name
      * @return a valid stripped name
+     * @throws NullPointerException     if {@code name} is null
+     * @throws IllegalArgumentException if {@code name} is blank
      */
     private static String sanitizeRoleName(String name) {
         Objects.requireNonNull(name, "Role name cannot be null");
@@ -100,69 +103,110 @@ public class ExtendedRole extends Role {
     }
 
     /**
-     * Adds a custom permission node directly to this role if the role is not read-only.
+     * Grants a native Project Zomboid capability to this role, bypassing the vanilla
+     * {@code readOnly} restriction to ensure declarative YAML configuration is authoritative.
      *
-     * @param permissionNode the permission node to grant
-     * @return {@code true} if the permission was granted, {@code false} if the node is invalid,
-     * already present, or if the role is read-only
-     * @apiNote Permission strings are stripped and normalized to lowercase (Locale.ROOT).
+     * @param capability the capability to grant
+     * @return {@code true} if the capability set was modified, {@code false} otherwise
      */
-    public boolean addPermission(String permissionNode) {
-        if (this.isReadOnly() || permissionNode == null || permissionNode.isBlank()) {
+    @Override
+    public boolean addCapability(Capability capability) {
+        if (capability == null || capability == Capability.None) {
             return false;
         }
+        HashSet<Capability> caps = this.getCapabilities();
+        if (caps != null) {
+            return caps.add(capability);
+        }
+        return false;
+    }
 
+    /**
+     * Clears all native capabilities from this role, bypassing vanilla {@code readOnly} restrictions.
+     */
+    @Override
+    public void cleanCapability() {
+        HashSet<Capability> caps = this.getCapabilities();
+        if (caps != null) {
+            caps.clear();
+        }
+    }
+
+    /**
+     * Evaluates whether this role holds the specified native Project Zomboid capability.
+     * Guaranteed to return {@code true} for {@link Capability#LoginOnServer} on all non-banned roles.
+     *
+     * @param capability the capability to verify
+     * @return {@code true} if held, {@code false} otherwise
+     */
+    @Override
+    public boolean hasCapability(Capability capability) {
+        if (capability == null || capability == Capability.None) {
+            return false;
+        }
+        if (capability == Capability.LoginOnServer && !"banned".equalsIgnoreCase(getName())) {
+            return true;
+        }
+        HashSet<Capability> caps = this.getCapabilities();
+        return caps != null && caps.contains(capability);
+    }
+
+    /**
+     * Grants a custom permission string directly to this role.
+     *
+     * @param permissionNode the permission node (e.g. {@code "avrix.commands.teleport"})
+     * @return {@code true} if granted, {@code false} if the node is null, blank, or already present
+     */
+    public boolean addPermission(String permissionNode) {
+        if (permissionNode == null || permissionNode.isBlank()) {
+            return false;
+        }
         return this.customPermissions.add(normalize(permissionNode));
     }
 
     /**
-     * Removes a custom permission node from this role if the role is not read-only.
+     * Revokes a custom permission string directly assigned to this role.
      *
      * @param permissionNode the permission node to revoke
-     * @return {@code true} if the permission was revoked, {@code false} if the node is invalid,
-     * was not present, or if the role is read-only
+     * @return {@code true} if revoked, {@code false} if not present or node is invalid
      */
     public boolean removePermission(String permissionNode) {
-        if (this.isReadOnly() || permissionNode == null || permissionNode.isBlank()) {
+        if (permissionNode == null || permissionNode.isBlank()) {
             return false;
         }
-
         return this.customPermissions.remove(normalize(permissionNode));
     }
 
     /**
-     * Checks whether this role has been granted the specified permission node directly
-     * or via its inheritance tree (parent roles).
+     * Evaluates whether this role possesses the target permission node,
+     * checking direct grants, wildcard patterns, and the inherited parent role hierarchy.
      *
-     * @param permissionNode the permission node to evaluate
-     * @return {@code true} if granted directly or inherited from any parent role
+     * @param permissionNode the target permission node to verify
+     * @return {@code true} if authorized directly or through inheritance, {@code false} otherwise
      */
     public boolean hasPermission(String permissionNode) {
         if (permissionNode == null || permissionNode.isBlank()) {
             return false;
         }
-
         return hasPermissionInternal(normalize(permissionNode), new HashSet<>());
     }
 
     /**
-     * Internal recursive evaluation with cycle-detection guard.
+     * Internal recursive evaluation resolving permission hierarchy with cycle detection.
      *
-     * @param normalizedTarget the normalized permission query
-     * @param visitedRoles     set of visited role names to prevent infinite recursion
-     * @return {@code true} if matched
+     * @param normalizedTarget the lowercase normalized target node
+     * @param visitedRoles     set of visited role names to prevent circular inheritance loops
+     * @return {@code true} if matched, {@code false} otherwise
      */
     private boolean hasPermissionInternal(String normalizedTarget, Set<String> visitedRoles) {
         if (!visitedRoles.add(this.getName().toLowerCase(Locale.ROOT))) {
             return false;
         }
 
-        // Check local permissions
         if (hasLocalPermission(normalizedTarget)) {
             return true;
         }
 
-        // Traverse inheritance tree
         for (String parentName : this.parents) {
             Role parentRole = Roles.getRole(parentName);
             if (parentRole instanceof ExtendedRole parentExtended) {
@@ -176,11 +220,11 @@ public class ExtendedRole extends Role {
     }
 
     /**
-     * Checks whether this specific role directly holds the specified permission node,
+     * Checks if this specific role directly holds the specified permission node,
      * ignoring any inherited parent roles.
      *
      * @param permissionNode the permission node to evaluate
-     * @return {@code true} if directly held
+     * @return {@code true} if held directly via exact match or local wildcard
      */
     public boolean hasLocalPermission(String permissionNode) {
         if (permissionNode == null || permissionNode.isBlank()) {
@@ -198,7 +242,7 @@ public class ExtendedRole extends Role {
     }
 
     /**
-     * Returns an unmodifiable snapshot view of all custom permissions assigned directly to this role.
+     * Retrieves an unmodifiable snapshot view of all custom permissions directly granted to this role.
      *
      * @return an unmodifiable set of normalized permission strings
      */
@@ -207,49 +251,46 @@ public class ExtendedRole extends Role {
     }
 
     /**
-     * Clears all custom permissions from this role if the role is not read-only.
+     * Clears all direct custom permissions from this role.
      */
     public void clearPermissions() {
-        if (!this.isReadOnly()) {
-            this.customPermissions.clear();
-        }
+        this.customPermissions.clear();
     }
 
     /**
-     * Adds a parent role to inherit permissions from.
+     * Adds an inherited parent role to this role's inheritance tree.
      *
-     * @param parentRoleName the name of the parent role
-     * @return {@code true} if added, {@code false} if invalid, self-referencing, or already present
+     * @param parentRoleName the unique name of the parent role
+     * @return {@code true} if added, {@code false} if invalid, already present, or self-referencing
      */
     public boolean addParent(String parentRoleName) {
-        if (this.isReadOnly() || parentRoleName == null || parentRoleName.isBlank()) {
+        if (parentRoleName == null || parentRoleName.isBlank()) {
             return false;
         }
 
         String cleanParent = parentRoleName.strip();
         if (cleanParent.equalsIgnoreCase(this.getName())) {
-            return false; // Prevent immediate self-inheritance
+            return false;
         }
 
         return this.parents.add(cleanParent);
     }
 
     /**
-     * Removes a parent role from the inheritance tree.
+     * Removes an inherited parent role from this role.
      *
-     * @param parentRoleName the parent role name to remove
-     * @return {@code true} if removed successfully
+     * @param parentRoleName the name of the parent role to remove
+     * @return {@code true} if removed, {@code false} otherwise
      */
     public boolean removeParent(String parentRoleName) {
-        if (this.isReadOnly() || parentRoleName == null || parentRoleName.isBlank()) {
+        if (parentRoleName == null || parentRoleName.isBlank()) {
             return false;
         }
-
         return this.parents.remove(parentRoleName.strip());
     }
 
     /**
-     * Returns an unmodifiable set of parent role names directly inherited by this role.
+     * Retrieves an unmodifiable snapshot view of all parent role names directly inherited by this role.
      *
      * @return an unmodifiable set of parent role names
      */
@@ -261,13 +302,11 @@ public class ExtendedRole extends Role {
      * Clears all inherited parent roles from this role.
      */
     public void clearParents() {
-        if (!this.isReadOnly()) {
-            this.parents.clear();
-        }
+        this.parents.clear();
     }
 
     /**
-     * Gets the visual chat/display prefix.
+     * Returns the chat and display prefix assigned to this role.
      *
      * @return the prefix string, never null
      */
@@ -276,18 +315,16 @@ public class ExtendedRole extends Role {
     }
 
     /**
-     * Sets the visual chat/display prefix.
+     * Sets the chat and display prefix for this role.
      *
-     * @param prefix the prefix string
+     * @param prefix the prefix string to set
      */
     public void setPrefix(String prefix) {
-        if (!this.isReadOnly()) {
-            this.prefix = prefix != null ? prefix : "";
-        }
+        this.prefix = prefix != null ? prefix : "";
     }
 
     /**
-     * Gets the visual chat/display suffix.
+     * Returns the chat and display suffix assigned to this role.
      *
      * @return the suffix string, never null
      */
@@ -296,26 +333,22 @@ public class ExtendedRole extends Role {
     }
 
     /**
-     * Sets the visual chat/display suffix.
+     * Sets the chat and display suffix for this role.
      *
-     * @param suffix the suffix string
+     * @param suffix the suffix string to set
      */
     public void setSuffix(String suffix) {
-        if (!this.isReadOnly()) {
-            this.suffix = suffix != null ? suffix : "";
-        }
+        this.suffix = suffix != null ? suffix : "";
     }
 
     /**
-     * Associates arbitrary metadata with this role.
+     * Sets or removes a custom metadata key-value pair on this role.
      *
-     * @param key   the metadata key
-     * @param value the metadata value
+     * @param key   the case-insensitive metadata key
+     * @param value the string value, or {@code null} to remove the key
      */
     public void setMeta(String key, String value) {
-        if (this.isReadOnly() || key == null || key.isBlank()) {
-            return;
-        }
+        if (key == null || key.isBlank()) return;
 
         if (value == null) {
             this.metadata.remove(key.strip().toLowerCase(Locale.ROOT));
@@ -325,29 +358,23 @@ public class ExtendedRole extends Role {
     }
 
     /**
-     * Retrieves a metadata value by key, resolving through inherited parents if not defined locally.
+     * Retrieves a metadata value by key, resolving hierarchically through parent roles if absent locally.
      *
-     * @param key the metadata key
-     * @return the metadata value, or {@code null} if not found
+     * @param key the case-insensitive metadata key
+     * @return the resolved string value, or {@code null} if not found
      */
     public String getMeta(String key) {
-        if (key == null || key.isBlank()) {
-            return null;
-        }
+        if (key == null || key.isBlank()) return null;
 
         String normalizedKey = key.strip().toLowerCase(Locale.ROOT);
         String local = this.metadata.get(normalizedKey);
-        if (local != null) {
-            return local;
-        }
+        if (local != null) return local;
 
         for (String parentName : this.parents) {
             Role parent = Roles.getRole(parentName);
             if (parent instanceof ExtendedRole parentExtended) {
                 String inherited = parentExtended.getMeta(key);
-                if (inherited != null) {
-                    return inherited;
-                }
+                if (inherited != null) return inherited;
             }
         }
 
@@ -355,7 +382,7 @@ public class ExtendedRole extends Role {
     }
 
     /**
-     * Returns an unmodifiable snapshot view of all direct metadata key-value pairs.
+     * Retrieves an unmodifiable snapshot view of all direct metadata key-value pairs.
      *
      * @return unmodifiable map of metadata
      */
@@ -364,36 +391,34 @@ public class ExtendedRole extends Role {
     }
 
     /**
-     * Normalizes a permission string by trimming whitespace and converting to lowercase using ROOT locale.
+     * Normalizes a permission string by stripping whitespace and converting to lowercase.
      *
      * @param raw the raw input string
-     * @return the normalized permission string
+     * @return the normalized string
      */
     private static String normalize(String raw) {
         return raw.strip().toLowerCase(Locale.ROOT);
     }
 
     /**
-     * Evaluates whether a granted permission rule satisfies a requested permission node.
+     * Evaluates whether a granted permission pattern encompasses a requested target node.
+     * Supports exact matches, global wildcard ({@code "*"}), and sub-tree wildcards ({@code "module.*"}).
      *
-     * @param granted   the pattern or exact permission registered in the role
-     * @param requested the target permission being queried
-     * @return {@code true} if {@code granted} encompasses {@code requested}
+     * @param granted   the pattern registered on the role
+     * @param requested the target node being checked
+     * @return {@code true} if granted covers requested
      */
     private static boolean matchesPermission(String granted, String requested) {
         if (GLOBAL_WILDCARD.equals(granted)) {
             return true;
         }
-
         if (granted.equals(requested)) {
             return true;
         }
-
         if (granted.endsWith(WILDCARD_SUFFIX)) {
             String prefix = granted.substring(0, granted.length() - WILDCARD_SUFFIX.length());
             return !prefix.isEmpty() && (requested.equals(prefix) || requested.startsWith(prefix + "."));
         }
-
         return false;
     }
 }

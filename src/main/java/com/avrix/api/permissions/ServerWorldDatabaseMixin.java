@@ -15,11 +15,15 @@ import java.util.ArrayList;
 
 /**
  * ClassTransform mixin for {@link ServerWorldDatabase} enabling SQLite persistence
- * of all {@link ExtendedRole} features.
+ * and startup loading of all {@link ExtendedRole} and permissions configuration.
  */
 @CTransformer(value = ServerWorldDatabase.class)
 public class ServerWorldDatabaseMixin {
 
+    /**
+     * Initializes ExtendedRole database tables and loads permissions.yml
+     * immediately after ServerWorldDatabase is created and SQLite connection is ready.
+     */
     @CInject(
             method = "create()V",
             target = @CTarget("TAIL")
@@ -30,9 +34,10 @@ public class ServerWorldDatabaseMixin {
             Field connField = ServerWorldDatabase.class.getDeclaredField("conn");
             connField.setAccessible(true);
             Connection conn = (Connection) connField.get(db);
+
             DatabasePermissionsHelper.initDatabaseSchema(conn);
         } catch (Exception e) {
-            DebugType.General.error("Failed to inject ExtendedRole tables: " + e.getMessage());
+            DebugType.General.error("Failed to initialize ExtendedRole schema: " + e.getMessage());
         }
     }
 
@@ -90,7 +95,6 @@ public class ServerWorldDatabaseMixin {
                     continue;
                 }
 
-                // Construct ExtendedRole copy preserving all standard attributes
                 ExtendedRole extendedRole = new ExtendedRole(
                         standardRole.getName(),
                         standardRole.getDescription(),
@@ -107,13 +111,8 @@ public class ServerWorldDatabaseMixin {
                     extendedRole.setReadOnly();
                 }
 
-                // Load all extended state (prefix, suffix, permissions, parents, metadata)
                 DatabasePermissionsHelper.loadCustomRoleData(conn, extendedRole);
-
-                // Replace vanilla Role with ExtendedRole in the list
                 roles.set(i, extendedRole);
-
-                // Re-link ALL matching static default fields in Roles
                 syncRolesStaticField(standardRole.getName(), extendedRole);
             }
         } catch (Exception e) {
@@ -121,9 +120,6 @@ public class ServerWorldDatabaseMixin {
         }
     }
 
-    /**
-     * Accurately updates all default role pointers in {@link Roles} according to PZ Build 42 defaults.
-     */
     private static void syncRolesStaticField(String roleName, ExtendedRole newRole) {
         if (roleName == null) return;
         switch (roleName.toLowerCase()) {

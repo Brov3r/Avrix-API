@@ -1,20 +1,124 @@
-[Main](../wiki-language.md) > [Documentation](wiki-main.md) > Permissions and Roles
+[Home](../wiki-language.md) > [Documentation](wiki-main.md) > Permissions and Roles (Permissions)
 
 ## 🛡️ Permissions and Roles (PermissionsManager)
 
-The **Avrix** permissions and roles subsystem enriches Project Zomboid's native role subsystem by adding custom string
-permission nodes (`permissions`), wildcard and prefix matching, hierarchical role inheritance trees, metadata (prefixes
-and suffixes), and automated SQLite persistence (`ServerWorldDatabase`).
-
-All operations are handled through the central static service `PermissionsManager`.
+The **Avrix** permissions and roles management subsystem extends Project Zomboid's native authorization system.
+Management is performed through the central `PermissionsManager` service.
 
 ---
 
-### Creating and Persisting Roles
+### Architectural Overview and Declarative `permissions.yml`
 
-To create a new role, use the `PermissionsManager.createRole(...)` method. The method automatically registers the role
-in the native `Roles` registry, persists it into the server's SQLite database, and synchronizes the state across all
-connected clients via network broadcast packets.
+The configuration file `permissions.yml`, automatically generated at `plugins/avrix-api/permissions.yml`, serves as the
+authoritative source of truth.
+
+#### Initialization Lifecycle:
+
+1. **Database Schema**: When the SQLite connection is established (`ServerWorldDatabase.create()`), the auxiliary tables
+   `role_permissions`, `role_parents`, and `role_metadata` are created, and the `prefix` and `suffix` columns are added
+   to the `role` table.
+2. **Configuration Loading**: Upon completion of the `Roles.init()` method, the `RolesMixin` hook triggers, loading
+   `permissions.yml`. This ensures that standard roles (`admin`, `moderator`, `user`, etc.) have already received
+   persistent SQLite primary keys and are not duplicated.
+3. **Secure Player Binding (Zero-Trust)**: User roles are cached in memory and safely assigned upon player
+   authentication (`syncPlayerLoginRole`), preventing the creation of stub accounts without passwords in the database.
+
+---
+
+### `permissions.yml` File Structure
+
+```yaml
+# =========================================================================
+# Avrix Permissions & Roles Configuration File
+# =========================================================================
+
+groups:
+  admin:
+    description: "Server Administrator with full root access"
+    color: "255,50,50,255"
+    prefix: "[Admin] "
+    suffix: ""
+    permissions:
+      - "*"
+    capabilities:
+      - "*"
+    parents: [ ]
+
+  moderator:
+    description: "Server Moderator - all capabilities except core server control"
+    color: "50,255,50,255"
+    prefix: "[Mod] "
+    suffix: ""
+    permissions:
+      - "avrix.commands.kick"
+      - "avrix.commands.teleport.*"
+      - "-avrix.commands.teleport.secretzone" # Explicit negation
+    capabilities:
+      - "LoginOnServer"
+      - "PriorityLogin"
+      - "CanSeePlayersStats"
+      - "KickUser"
+      - "BanUnbanUser"
+    parents:
+      - "user"
+
+  vip:
+    description: "VIP Supporter role"
+    color: "255,215,0,255"
+    prefix: "[VIP] "
+    suffix: " ★"
+    permissions:
+      - "avrix.chat.color"
+      - "avrix.kits.vip"
+    capabilities:
+      - "LoginOnServer"
+      - "PriorityLogin"
+    parents:
+      - "user"
+    metadata:
+      maxHomes: "5"
+      chatColor: "gold"
+
+  user:
+    description: "Default Survivor"
+    color: "255,255,255,255"
+    prefix: ""
+    suffix: ""
+    permissions:
+      - "avrix.commands.help"
+    capabilities:
+      - "LoginOnServer"
+    parents: [ ]
+
+  banned:
+    description: "Banned role - forbidden from logging in"
+    color: "128,128,128,255"
+    prefix: "[Banned] "
+    suffix: ""
+    permissions: [ ]
+    capabilities: [ ]
+    parents: [ ]
+
+users:
+  # Role and direct permission assignment by Username
+  "Brov3r":
+    group: "admin"
+    permissions:
+      - "avrix.developer.debug"
+
+  # Role and temporary permission assignment by 64-bit SteamID
+  76561198012345678:
+    group: "vip"
+    temporaryPermissions:
+      "avrix.boost.experience": "2026-12-31T23:59:59Z"
+```
+
+---
+
+### Programmatic Role Creation and Modification (`ExtendedRole`)
+
+The `ExtendedRole` class extends the native `zombie.characters.Role`, lifting vanilla `readOnly` constraints when
+invoking methods that add permissions and capabilities.
 
 ```java
 package com.example.plugin;
@@ -33,34 +137,32 @@ import java.util.List;
 
 public class ExamplePlugin implements Plugin {
 
-    private static final String ROLE_VIP = "VIP";
-
     @Override
     public void onInitialize(PluginData pluginData) {
-        // Register event listeners
+        // Plugin event listener registration
     }
 
     @SubscribeEvent(DefaultEvents.ON_SERVER_STARTED)
     private void onServerStarted() {
-        // Create role if it does not yet exist in the database
-        if (Roles.getRole(ROLE_VIP) == null) {
-            ExtendedRole vip = PermissionsManager.createRole(
-                    ROLE_VIP,
-                    "VIP player with colored chat and special perks",
-                    new Color(1.0f, 0.84f, 0.0f, 1.0f), // Gold color
-                    List.of(Capability.LoginOnServer, Capability.CanSeePlayersStats),
+        // Check if the role exists in the registry
+        if (Roles.getRole("Elite") == null) {
+            ExtendedRole elite = PermissionsManager.createRole(
+                    "Elite",
+                    "Elite status with extended privileges",
+                    new Color(0.2f, 0.8f, 1.0f, 1.0f),
+                    List.of(Capability.LoginOnServer, Capability.PriorityLogin),
                     "avrix.chat.color",
-                    "avrix.commands.fly",
-                    "avrix.kits.vip"
+                    "avrix.commands.fly"
             );
 
-            // Configure visual prefix and inheritance
-            vip.setPrefix("&6[VIP]&f ");
-            vip.addParent("User");
-            vip.setMeta("maxHomes", "3");
+            // Configure prefixes, inheritance, and metadata
+            elite.setPrefix("[Elite] ");
+            elite.setSuffix(" ✦");
+            elite.addParent("user");
+            elite.setMeta("maxHomes", "10");
 
-            // Persist updated attributes to SQLite
-            PermissionsManager.saveRoleToDatabase(vip);
+            // Persist changes to SQLite and synchronize across the network
+            PermissionsManager.saveRoleToDatabase(elite);
         }
     }
 }
@@ -70,140 +172,159 @@ public class ExamplePlugin implements Plugin {
 
 ### Assigning Roles to Players and Connections
 
-The service allows assigning roles to online players (`IsoPlayer`, `UdpConnection`) as well as offline user accounts by
-their username.
-
-#### 1. Assigning to an In-Game Player
-
 ```java
-@SubscribeEvent(custom = "OnPlayerConnected")
-private void onPlayerJoin(IsoPlayer player, IConnection connection) {
-    if ("Brov3r".equalsIgnoreCase(player.getUsername())) {
-        // Assigns role to player entity, network socket, and persists record in SQLite (whitelist)
-        boolean success = PermissionsManager.assignRole(player, "VIP");
-        System.out.println("Role assigned: " + success);
-    }
-}
-```
+// 1. To an online player entity (synchronizes entity, network, and database)
+PermissionsManager.assignRole(player, "admin");
 
-#### 2. Assigning by Username (Online or Offline)
+// 2. To a network connection (UdpConnection)
+PermissionsManager.
 
-```java
-// If online: updates active entity and connection; if offline: updates database record directly
-PermissionsManager.assignRole("Alex", "Moderator");
-```
+assignRole(connection, "moderator");
 
-#### 3. Assigning to a Network Connection (`UdpConnection`)
+// 3. By Username or SteamID64 (for online players and database updates)
+PermissionsManager.
 
-```java
-PermissionsManager.assignRole(udpConnection, "Admin");
+assignRole("Brov3r","admin");
+PermissionsManager.
+
+assignRole("76561198012345678","vip");
 ```
 
 ---
 
-### Evaluating Permissions (`hasPermission`)
+### Permission Evaluation (`hasPermission`)
 
-Permission checks support global wildcards (`*`), hierarchical branch wildcards (`avrix.commands.*`), role inheritance
-trees, and user-specific personal overrides.
+The permission evaluation algorithm enforces strict priority for negative nodes (**Negations First**):
 
 ```mermaid
 flowchart TD
-    Check[PermissionsManager.hasPermission player, 'avrix.kit.vip'] --> Debug{Role.isUsingDebugMode?}
-    Debug -- Yes --> Allow[Access Granted true]
-    Debug -- No --> Personal{Has User-Specific Personal Node?}
+    Start[PermissionsManager.hasPermission] --> Debug{Role.isUsingDebugMode?}
+    Debug -- Yes --> Allow[Allowed: true]
+    Debug -- No --> NegCheck{Is there an explicit '-node' negation for the player?}
     
-    Personal -- Yes --> Allow
-    Personal -- No --> RoleCheck{Role is ExtendedRole?}
+    NegCheck -- Yes --> Deny[Denied: false]
+    NegCheck -- No --> DirectCheck{Is there a direct permission for Username or SteamID?}
     
-    RoleCheck -- Yes --> ERCheck{Direct Node or Wildcard Match?}
-    ERCheck -- Yes --> Allow
-    ERCheck -- No --> Inherit{Inherited in Parent Roles?}
-    Inherit -- Yes --> Allow
-    Inherit -- No --> CapCheck{Matches Capability Enum?}
+    DirectCheck -- Yes --> Allow
+    DirectCheck -- No --> RoleNeg{Is there a '-node' negation in the role or parents?}
     
-    RoleCheck -- No --> CapCheck
-    CapCheck -- Yes and Role Has Capability --> Allow
-    CapCheck -- No --> Deny[Access Denied false]
+    RoleNeg -- Yes --> Deny
+    RoleNeg -- No --> RoleCheck{Does the node or wildcard match in the role/parents?}
+    
+    RoleCheck -- Yes --> Allow
+    RoleCheck -- No --> CapCheck{Does it match a Capability Enum?}
+    
+    CapCheck -- Yes and role has Capability --> Allow
+    CapCheck -- No --> Deny
 ```
 
-#### Code Examples:
+#### Evaluation Examples:
 
 ```java
-// 1. Evaluating an in-game IsoPlayer instance
-if (PermissionsManager.hasPermission(player, "avrix.commands.heal")) {
-    player.getBodyDamage().RestoreToFullHealth();
+// Check on an IsoPlayer
+if(PermissionsManager.hasPermission(player, "avrix.commands.heal")){
+        player.
+
+getBodyDamage().
+
+RestoreToFullHealth();
 }
 
-// 2. Evaluating an active UdpConnection socket
-if (PermissionsManager.hasPermission(connection, "avrix.admin.notify")) {
-    // Send administrative notification packet
-}
+// Check on an active UdpConnection
+        if(PermissionsManager.
 
-// 3. Evaluating a Role instance
-Role role = player.getRole();
-if (PermissionsManager.hasPermission(role, "avrix.chat.color")) {
-    // Apply chat formatting
-}
-```
+hasPermission(connection, "avrix.admin.panel")){
+        // Send UI network packet
+        }
 
----
+// Check on a Role object
+        if(PermissionsManager.
 
-### Wildcard and Prefix Rules
-
-| Granted Node (`Granted`) | Evaluated Query (`Checked`) | Result  | Description                                   |
-|:-------------------------|:----------------------------|:-------:|:----------------------------------------------|
-| `*`                      | *any permission node*       | `true`  | Global root wildcard granting all permissions |
-| `avrix.commands.*`       | `avrix.commands.heal`       | `true`  | Matches direct descendant nodes               |
-| `avrix.commands.*`       | `avrix.commands.tp.coords`  | `true`  | Matches multi-level nested sub-branches       |
-| `avrix.commands.*`       | `avrix.chat.color`          | `false` | Independent branch                            |
-| `avrix.kit.vip`          | `avrix.kit.vip`             | `true`  | Exact node match                              |
-
----
-
-### User-Specific Personal Permissions
-
-To grant or revoke permissions for a specific username without altering their role:
-
-```java
-// Grant permission to a specific username
-PermissionsManager.grantPermissionToPlayer("Brov3r", "avrix.special.event2026");
-
-// Revoke a personal permission
-PermissionsManager.revokePermissionFromPlayer("Brov3r", "avrix.special.event2026");
-
-// Clear all personal permissions for a user (e.g. upon session teardown)
-PermissionsManager.clearPlayerPermissions("Brov3r");
-
-// Retrieve an unmodifiable set of granted personal permissions
-Set<String> perms = PermissionsManager.getPlayerPermissions("Brov3r");
+hasPermission(role, "avrix.chat.color")){
+        // Allow chat formatting
+        }
 ```
 
 ---
 
-### Native Project Zomboid `Capability` Checks
+### Wildcard and Negation Matching Table
 
-For seamless compatibility with vanilla engine logic, helper methods evaluating the native `Capability` enum are
-provided:
+| Granted Permission (`Granted`) | Checked Permission (`Checked`) | Result  | Description                                            |
+|:-------------------------------|:-------------------------------|:-------:|:-------------------------------------------------------|
+| `*`                            | `any.node`                     | `true`  | Global root access to all permissions                  |
+| `avrix.commands.*`             | `avrix.commands.teleport`      | `true`  | Covers all first-level child nodes                     |
+| `avrix.commands.*`             | `avrix.commands.zone.create`   | `true`  | Covers nested subtrees                                 |
+| `avrix.commands.*`             | `avrix.chat.color`             | `false` | Different permission branch                            |
+| `-avrix.commands.stop`         | `avrix.commands.stop`          | `false` | Explicit negation overrides group wildcard permissions |
+| `avrix.kit.vip`                | `avrix.kit.vip`                | `true`  | Exact direct match                                     |
+
+---
+
+### Personal Permanent and Temporary Permissions
+
+The service supports granting permissions for a specific duration with automatic purging upon expiration.
 
 ```java
-// Evaluating an in-game player
-boolean canCheat = PermissionsManager.hasCapability(player, Capability.ToggleGodModHimself);
+import java.time.Instant;
+import java.util.Collection;
+import java.util.concurrent.TimeUnit;
 
-// Evaluating a network connection socket
+// Permanent personal permission (by Username or SteamID64)
+PermissionsManager.grantPermissionToPlayer("Brov3r","avrix.special.access");
+
+// Temporary permission for 7 days
+PermissionsManager.
+
+grantPermissionToPlayer("Brov3r","avrix.vip.boost",7,TimeUnit.DAYS);
+
+// Temporary permission until an exact ISO-8601 timestamp
+PermissionsManager.
+
+grantPermissionToPlayer("76561198012345678","avrix.event.2026",Instant.parse("2026-12-31T23:59:59Z"));
+
+// Revoke permission
+        PermissionsManager.
+
+revokePermissionFromPlayer("Brov3r","avrix.special.access");
+
+// Retrieve active entries with expiration validation
+Collection<PlayerPermission> entries = PermissionsManager.getPlayerPermissionEntries("Brov3r");
+for(
+PlayerPermission entry :entries){
+        System.out.
+
+printf("Node: %s, Expired: %s, Expiration: %s%n",
+       entry.node(),entry.
+
+isExpired(),entry.
+
+expirationDate());
+        }
+```
+
+---
+
+### Native `Capability` Checks
+
+```java
+// Check on an online player entity
+boolean canFly = PermissionsManager.hasCapability(player, Capability.ToggleNoclipHimself);
+
+// Check on an active network socket
 boolean canSeeStats = PermissionsManager.hasCapability(connection, Capability.CanSeePlayersStats);
 
-// Evaluating a Role instance
-boolean canLogin = PermissionsManager.hasCapability(role, Capability.LoginOnServer);
-
-// Evaluating by username
-boolean canSetupZone = PermissionsManager.hasCapability("Brov3r", Capability.CanSetupNonPVPZone);
+// Check by username
+boolean canJoin = PermissionsManager.hasCapability("Brov3r", Capability.LoginOnServer);
 ```
 
 ---
 
-### Deleting Roles
+### Subsystem Events (`ServerEvents`)
 
-```java
-// Deletes role from memory, Roles registry, and SQLite database while cascading permission cleanup
-boolean deleted = PermissionsManager.deleteRole("OldRole", "AdminName");
-```
+The subsystem publishes the following events via `EventManager`:
+
+| Event Name                          | Arguments                                         | Description                                                   |
+|:------------------------------------|:--------------------------------------------------|:--------------------------------------------------------------|
+| `ServerEvents.PLAYER_ROLE_ASSIGNED` | `IsoPlayer player, Role oldRole, Role newRole`    | Triggered when a player's role changes                        |
+| `ServerEvents.PERMISSION_GRANTED`   | `String identifier, String node, Instant expires` | Triggered when a permanent or temporary permission is granted |
+| `ServerEvents.PERMISSION_REVOKED`   | `String identifier, String node`                  | Triggered when a permission is revoked                        |

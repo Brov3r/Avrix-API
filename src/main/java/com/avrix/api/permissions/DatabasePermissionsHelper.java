@@ -26,7 +26,6 @@ public final class DatabasePermissionsHelper {
         if (conn == null) return;
 
         try (Statement stat = conn.createStatement()) {
-            // Role permissions table
             stat.executeUpdate("""
                         CREATE TABLE IF NOT EXISTS role_permissions (
                             role INTEGER NOT NULL,
@@ -38,7 +37,6 @@ public final class DatabasePermissionsHelper {
                         ON role_permissions (role, node)
                     """);
 
-            // Role inheritance parents table
             stat.executeUpdate("""
                         CREATE TABLE IF NOT EXISTS role_parents (
                             role INTEGER NOT NULL,
@@ -50,7 +48,6 @@ public final class DatabasePermissionsHelper {
                         ON role_parents (role, parent)
                     """);
 
-            // Role metadata table
             stat.executeUpdate("""
                         CREATE TABLE IF NOT EXISTS role_metadata (
                             role INTEGER NOT NULL,
@@ -81,28 +78,62 @@ public final class DatabasePermissionsHelper {
     }
 
     /**
+     * Resolves the primary key ID of a role from SQLite by its unique name.
+     *
+     * @param conn the database connection
+     * @param role the role to resolve ID for
+     * @return the resolved role ID from DB, or -1 if not found
+     */
+    private static int resolveRoleId(Connection conn, Role role) {
+        if (role == null || role.getName() == null) return -1;
+        if (role.getId() > 0) return role.getId();
+
+        try (PreparedStatement stat = conn.prepareStatement("SELECT id FROM role WHERE name = ? COLLATE NOCASE")) {
+            stat.setString(1, role.getName().strip());
+            try (ResultSet rs = stat.executeQuery()) {
+                if (rs.next()) {
+                    int dbId = rs.getInt("id");
+                    role.setId(dbId);
+                    return dbId;
+                }
+            }
+        } catch (SQLException e) {
+            DebugType.Multiplayer.printException(e, "Failed to resolve role ID for: " + role.getName(), LogSeverity.Error);
+        }
+        return -1;
+    }
+
+    /**
      * Persists all extended attributes (prefix, suffix, permissions, parents, metadata) of an {@link ExtendedRole}.
      *
      * @param conn the database connection
      * @param role the role being saved
      */
     public static void saveCustomRoleData(Connection conn, Role role) {
-        if (conn == null || !(role instanceof ExtendedRole extendedRole) || role.getId() == -1) {
+        if (conn == null || !(role instanceof ExtendedRole extendedRole)) {
             return;
         }
 
-        int roleId = role.getId();
+        int roleId = resolveRoleId(conn, role);
+        if (roleId <= 0) {
+            return;
+        }
 
         try {
-            // Update prefix and suffix in role table
-            try (PreparedStatement stat = conn.prepareStatement("UPDATE role SET prefix = ?, suffix = ? WHERE id = ?")) {
-                stat.setString(1, extendedRole.getPrefix());
-                stat.setString(2, extendedRole.getSuffix());
-                stat.setInt(3, roleId);
+            // Force update base role table (bypassing PZ's 'readonly = false' lock)
+            try (PreparedStatement stat = conn.prepareStatement(
+                    "UPDATE role SET description = ?, colorR = ?, colorG = ?, colorB = ?, prefix = ?, suffix = ? WHERE id = ?")) {
+                stat.setString(1, role.getDescription() != null ? role.getDescription() : "");
+                stat.setFloat(2, role.getColor() != null ? role.getColor().r : 1.0f);
+                stat.setFloat(3, role.getColor() != null ? role.getColor().g : 1.0f);
+                stat.setFloat(4, role.getColor() != null ? role.getColor().b : 1.0f);
+                stat.setString(5, extendedRole.getPrefix() != null ? extendedRole.getPrefix() : "");
+                stat.setString(6, extendedRole.getSuffix() != null ? extendedRole.getSuffix() : "");
+                stat.setInt(7, roleId);
                 stat.executeUpdate();
             }
 
-            // Permissions sync
+            // Synchronize permissions
             try (PreparedStatement deleteStat = conn.prepareStatement("DELETE FROM role_permissions WHERE role = ?")) {
                 deleteStat.setInt(1, roleId);
                 deleteStat.executeUpdate();
@@ -110,14 +141,16 @@ public final class DatabasePermissionsHelper {
             if (!extendedRole.getPermissions().isEmpty()) {
                 try (PreparedStatement insertStat = conn.prepareStatement("INSERT INTO role_permissions (role, node) VALUES (?, ?)")) {
                     for (String permission : extendedRole.getPermissions()) {
-                        insertStat.setInt(1, roleId);
-                        insertStat.setString(2, permission);
-                        insertStat.executeUpdate();
+                        if (permission != null && !permission.isBlank()) {
+                            insertStat.setInt(1, roleId);
+                            insertStat.setString(2, permission.strip());
+                            insertStat.executeUpdate();
+                        }
                     }
                 }
             }
 
-            // Parents sync
+            // Synchronize parents
             try (PreparedStatement deleteStat = conn.prepareStatement("DELETE FROM role_parents WHERE role = ?")) {
                 deleteStat.setInt(1, roleId);
                 deleteStat.executeUpdate();
@@ -125,14 +158,16 @@ public final class DatabasePermissionsHelper {
             if (!extendedRole.getParents().isEmpty()) {
                 try (PreparedStatement insertStat = conn.prepareStatement("INSERT INTO role_parents (role, parent) VALUES (?, ?)")) {
                     for (String parent : extendedRole.getParents()) {
-                        insertStat.setInt(1, roleId);
-                        insertStat.setString(2, parent);
-                        insertStat.executeUpdate();
+                        if (parent != null && !parent.isBlank()) {
+                            insertStat.setInt(1, roleId);
+                            insertStat.setString(2, parent.strip());
+                            insertStat.executeUpdate();
+                        }
                     }
                 }
             }
 
-            // Metadata sync
+            // Synchronize metadata
             try (PreparedStatement deleteStat = conn.prepareStatement("DELETE FROM role_metadata WHERE role = ?")) {
                 deleteStat.setInt(1, roleId);
                 deleteStat.executeUpdate();
@@ -159,11 +194,14 @@ public final class DatabasePermissionsHelper {
      * @param role the extended role instance
      */
     public static void loadCustomRoleData(Connection conn, ExtendedRole role) {
-        if (conn == null || role == null || role.getId() == -1) {
+        if (conn == null || role == null) {
             return;
         }
 
-        int roleId = role.getId();
+        int roleId = resolveRoleId(conn, role);
+        if (roleId <= 0) {
+            return;
+        }
 
         try {
             // Load prefix and suffix
@@ -230,7 +268,7 @@ public final class DatabasePermissionsHelper {
      * @param roleId the ID of the deleted role
      */
     public static void deleteCustomRoleData(Connection conn, int roleId) {
-        if (conn == null || roleId == -1) return;
+        if (conn == null || roleId <= 0) return;
 
         try {
             try (PreparedStatement stat = conn.prepareStatement("DELETE FROM role_permissions WHERE role = ?")) {

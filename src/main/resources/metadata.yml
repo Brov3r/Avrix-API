@@ -17,4 +17,6 @@ mixins:
   - "com.avrix.api.events.LuaEventManagerMixin"
   - "com.avrix.api.events.GameServerEventsMixin"
   - "com.avrix.api.commands.GameServerCommandsMixin"
+  - "com.avrix.api.permissions.RolesMixin"
+  - "com.avrix.api.permissions.GameServerPermissionsMixin"
   - "com.avrix.api.permissions.ServerWorldDatabaseMixin"
