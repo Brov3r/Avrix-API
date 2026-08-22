@@ -6,23 +6,17 @@ import org.slf4j.LoggerFactory;
 import java.lang.invoke.MethodHandle;
 import java.lang.invoke.MethodHandles;
 import java.lang.reflect.Method;
-import java.util.List;
-import java.util.Map;
-import java.util.Objects;
+import java.util.*;
 import java.util.concurrent.ConcurrentHashMap;
-import java.util.concurrent.CopyOnWriteArrayList;
+import java.util.concurrent.locks.ReentrantLock;
 
 /**
- * Static central event manager for Avrix.
- * <p>
- * Handles listener registration and event dispatching across Project Zomboid and Avrix plugins.
+ * High-performance, thread-safe central event dispatcher for Avrix and Project Zomboid.
  */
 public final class EventManager {
+
     private static final Logger LOGGER = LoggerFactory.getLogger(EventManager.class);
 
-    /**
-     * Common priority presets for convenience.
-     */
     public static final int PRIORITY_HIGHEST = 1000;
     public static final int PRIORITY_HIGH = 100;
     public static final int PRIORITY_NORMAL = 0;
@@ -30,9 +24,10 @@ public final class EventManager {
     public static final int PRIORITY_LOWEST = -1000;
 
     /**
-     * Map storing event subscribers: EventName -> Sorted List of Invokers
+     * Map storing event subscribers: EventName -> Immutable Sorted Array of Invokers
      */
-    private static final Map<String, List<HandlerInvoker>> HANDLERS = new ConcurrentHashMap<>();
+    private static final Map<String, HandlerInvoker[]> HANDLERS = new ConcurrentHashMap<>();
+    private static final ReentrantLock REGISTRATION_LOCK = new ReentrantLock();
 
     private EventManager() {
         throw new UnsupportedOperationException("EventManager is a static utility class");
@@ -42,33 +37,43 @@ public final class EventManager {
      * Registers all methods annotated with {@link SubscribeEvent} inside the given object.
      *
      * @param listener Object containing subscriber methods
+     * @throws NullPointerException if listener is null
      */
     public static void register(Object listener) {
         Objects.requireNonNull(listener, "Listener instance cannot be null");
         Class<?> clazz = listener.getClass();
 
-        for (Method method : clazz.getDeclaredMethods()) {
-            SubscribeEvent annotation = method.getAnnotation(SubscribeEvent.class);
-            if (annotation == null) {
-                continue;
+        REGISTRATION_LOCK.lock();
+        try {
+            for (Method method : clazz.getDeclaredMethods()) {
+                SubscribeEvent annotation = method.getAnnotation(SubscribeEvent.class);
+                if (annotation == null) {
+                    continue;
+                }
+
+                String eventName = resolveEventName(annotation);
+                int priority = annotation.priority();
+
+                try {
+                    method.setAccessible(true);
+                    MethodHandle handle = MethodHandles.lookup().unreflect(method).bindTo(listener);
+                    HandlerInvoker invoker = new HandlerInvoker(
+                            listener, handle, method.getParameterTypes(), priority, eventName
+                    );
+
+                    HandlerInvoker[] current = HANDLERS.getOrDefault(eventName, new HandlerInvoker[0]);
+                    List<HandlerInvoker> list = new ArrayList<>(Arrays.asList(current));
+                    list.add(invoker);
+
+                    // Sort descending by priority: highest priority executes first
+                    list.sort((a, b) -> Integer.compare(b.priority(), a.priority()));
+                    HANDLERS.put(eventName, list.toArray(HandlerInvoker[]::new));
+                } catch (IllegalAccessException e) {
+                    LOGGER.error("Failed to bind event listener method '{}' in class '{}'", method.getName(), clazz.getName(), e);
+                }
             }
-
-            String eventName = resolveEventName(annotation);
-            int priority = annotation.priority();
-
-            try {
-                method.setAccessible(true);
-                MethodHandle handle = MethodHandles.lookup().unreflect(method).bindTo(listener);
-                HandlerInvoker invoker = new HandlerInvoker(listener, handle, method.getParameterTypes(), priority, eventName);
-
-                List<HandlerInvoker> list = HANDLERS.computeIfAbsent(eventName, _ -> new CopyOnWriteArrayList<>());
-                list.add(invoker);
-
-                // Sort descending by priority: highest priority executes first
-                list.sort((a, b) -> Integer.compare(b.priority, a.priority));
-            } catch (IllegalAccessException e) {
-                LOGGER.error("Failed to bind event listener method '{}' in class '{}'", method.getName(), clazz.getName(), e);
-            }
+        } finally {
+            REGISTRATION_LOCK.unlock();
         }
     }
 
@@ -82,8 +87,21 @@ public final class EventManager {
             return;
         }
 
-        for (List<HandlerInvoker> list : HANDLERS.values()) {
-            list.removeIf(invoker -> invoker.target == listener);
+        REGISTRATION_LOCK.lock();
+        try {
+            HANDLERS.forEach((eventName, currentArray) -> {
+                List<HandlerInvoker> list = new ArrayList<>(Arrays.asList(currentArray));
+                boolean removed = list.removeIf(invoker -> invoker.target() == listener);
+                if (removed) {
+                    if (list.isEmpty()) {
+                        HANDLERS.remove(eventName);
+                    } else {
+                        HANDLERS.put(eventName, list.toArray(HandlerInvoker[]::new));
+                    }
+                }
+            });
+        } finally {
+            REGISTRATION_LOCK.unlock();
         }
     }
 
@@ -111,12 +129,12 @@ public final class EventManager {
             return;
         }
 
-        List<HandlerInvoker> list = HANDLERS.get(eventName);
-        if (list == null || list.isEmpty()) {
+        HandlerInvoker[] array = HANDLERS.get(eventName);
+        if (array == null) {
             return;
         }
 
-        for (HandlerInvoker invoker : list) {
+        for (HandlerInvoker invoker : array) {
             invoker.invoke(args);
         }
     }
@@ -129,7 +147,7 @@ public final class EventManager {
     }
 
     /**
-     * Internal wrapper for direct high-performance execution of an event listener method.
+     * Internal invoker for high-performance execution of an event listener method.
      */
     private record HandlerInvoker(
             Object target,
@@ -140,23 +158,29 @@ public final class EventManager {
     ) {
         public void invoke(Object[] incomingArgs) {
             try {
-                if (parameterTypes.length == 0) {
+                int paramCount = parameterTypes.length;
+                if (paramCount == 0) {
                     handle.invoke();
                     return;
                 }
 
-                Object[] boundArgs = new Object[parameterTypes.length];
                 int available = incomingArgs != null ? incomingArgs.length : 0;
 
-                for (int i = 0; i < parameterTypes.length; i++) {
+                // Fast-Path: Argument count matches and types are directly compatible (Zero-Allocation)
+                if (paramCount == available && isDirectCompatible(incomingArgs)) {
+                    handle.invokeWithArguments(incomingArgs);
+                    return;
+                }
+
+                // Slow-Path: Auto-cast Lua numbers and supply primitive default values if argument missing
+                Object[] boundArgs = new Object[paramCount];
+                for (int i = 0; i < paramCount; i++) {
                     Class<?> targetType = parameterTypes[i];
                     Object rawValue = (i < available) ? incomingArgs[i] : null;
 
                     if (rawValue == null && targetType.isPrimitive()) {
-                        // Prevent NullPointerException during unboxing by providing primitive default
                         boundArgs[i] = getDefaultPrimitiveValue(targetType);
                     } else if (rawValue instanceof Number number && targetType.isPrimitive()) {
-                        // Auto-widen/narrow numbers (e.g. Double from Lua into float/int in Java)
                         boundArgs[i] = adaptNumber(number, targetType);
                     } else {
                         boundArgs[i] = rawValue;
@@ -171,14 +195,26 @@ public final class EventManager {
             }
         }
 
+        private boolean isDirectCompatible(Object[] args) {
+            for (int i = 0; i < parameterTypes.length; i++) {
+                Object arg = args[i];
+                if (arg == null) {
+                    if (parameterTypes[i].isPrimitive()) return false;
+                } else if (!parameterTypes[i].isInstance(arg)) {
+                    return false;
+                }
+            }
+            return true;
+        }
+
         private static Object getDefaultPrimitiveValue(Class<?> type) {
             if (type == boolean.class) return false;
-            if (type == byte.class) return (byte) 0;
-            if (type == short.class) return (short) 0;
             if (type == int.class) return 0;
-            if (type == long.class) return 0L;
             if (type == float.class) return 0.0f;
             if (type == double.class) return 0.0d;
+            if (type == long.class) return 0L;
+            if (type == short.class) return (short) 0;
+            if (type == byte.class) return (byte) 0;
             if (type == char.class) return '\0';
             return null;
         }
