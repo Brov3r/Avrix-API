@@ -15,6 +15,7 @@ import java.util.Map;
 import java.util.Objects;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.TimeUnit;
+import java.util.stream.Collectors;
 
 /**
  * Thread-safe command management and dispatching engine.
@@ -27,6 +28,19 @@ public final class CommandManager {
 
     private CommandManager() {
         throw new UnsupportedOperationException("Utility class cannot be instantiated");
+    }
+
+    /**
+     * Returns an unmodifiable snapshot view of all registered commands.
+     *
+     * @return read-only map of registered commands
+     */
+    public static Map<String, Command> getCommands() {
+        return COMMAND_REGISTRY.entrySet().stream()
+                .collect(Collectors.toUnmodifiableMap(
+                        Map.Entry::getKey,
+                        e -> e.getValue().command()
+                ));
     }
 
     /**
@@ -62,10 +76,10 @@ public final class CommandManager {
         }
 
         if (info.cooldown() > 0) {
-            LOGGER.info("Registered command '/{}' [scope: {}, cooldown: {} {}, aliases: {}]",
+            LOGGER.debug("Registered command '/{}' [scope: {}, cooldown: {} {}, aliases: {}]",
                     primaryName, info.scope(), info.cooldown(), info.cooldownUnit(), Arrays.toString(info.aliases()));
         } else {
-            LOGGER.info("Registered command '/{}' [scope: {}, aliases: {}]",
+            LOGGER.debug("Registered command '/{}' [scope: {}, aliases: {}]",
                     primaryName, info.scope(), Arrays.toString(info.aliases()));
         }
     }

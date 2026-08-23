@@ -83,3 +83,23 @@ tasks.named('shadowJar', ShadowJar) {
         )
     }
 }
+
+tasks.register('sourceJar', Jar) {
+    group = 'build'
+    description = 'Builds the Avrix loader sources JAR.'
+
+    archiveBaseName.set(baseArchiveName)
+    archiveClassifier.set('sources')
+    destinationDirectory.set(file(customBuildPath))
+
+    duplicatesStrategy = DuplicatesStrategy.EXCLUDE
+    from(sourceSets.main.allSource)
+}
+
+tasks.register('releaseBuildJar') {
+    group = 'build'
+    description = 'Builds the executable and sources JARs for release.'
+
+    dependsOn tasks.named('shadowJar')
+    dependsOn tasks.named('sourceJar')
+}

@@ -36,6 +36,7 @@ public class ServerWorldDatabaseMixin {
             Connection conn = (Connection) connField.get(db);
 
             DatabasePermissionsHelper.initDatabaseSchema(conn);
+            PermissionsManager.loadDatabasePlayerPermissions(conn);
         } catch (Exception e) {
             DebugType.General.error("Failed to initialize ExtendedRole schema: " + e.getMessage());
         }
