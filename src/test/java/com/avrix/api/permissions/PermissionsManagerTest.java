@@ -406,6 +406,273 @@ class PermissionsManagerTest {
 
             assertThat(PermissionsManager.getPlayerPermissions("CleanMe")).isEmpty();
         }
+
+        @Test
+        @DisplayName("Should persist and restore player permissions across server restarts via SQLite")
+        void shouldPersistAndRestorePlayerPermissionsAcrossRestart() throws Exception {
+            try (java.sql.Connection conn = java.sql.DriverManager.getConnection("jdbc:sqlite::memory:")) {
+                DatabasePermissionsHelper.initDatabaseSchema(conn);
+
+                String user = "Brov3r";
+                String permanentNode = "avrix.admin.nuke";
+                String temporaryNode = "avrix.vip.boost";
+                Instant futureExp = Instant.now().plus(30, ChronoUnit.DAYS);
+
+                PermissionsManager.grantPermissionToPlayer(user, permanentNode);
+                PermissionsManager.grantPermissionToPlayer(user, temporaryNode, futureExp);
+
+                DatabasePermissionsHelper.savePlayerPermission(conn, user, permanentNode, null);
+                DatabasePermissionsHelper.savePlayerPermission(conn, user, temporaryNode, futureExp);
+
+                clearManagerCache();
+                assertThat(PermissionsManager.getPlayerPermissions(user)).isEmpty();
+
+                PermissionsManager.loadDatabasePlayerPermissions(conn);
+
+                IsoPlayer player = createMockPlayer(user, 0L, null);
+                assertThat(PermissionsManager.hasPermission(player, permanentNode)).isTrue();
+                assertThat(PermissionsManager.hasPermission(player, temporaryNode)).isTrue();
+                assertThat(PermissionsManager.getPlayerPermissions(user))
+                        .containsExactlyInAnyOrder(permanentNode, temporaryNode);
+
+                Collection<PlayerPermission> entries = PermissionsManager.getPlayerPermissionEntries(user);
+                assertThat(entries).hasSize(2);
+                for (PlayerPermission entry : entries) {
+                    if (entry.node().equals(temporaryNode)) {
+                        assertThat(entry.expiration()).isNotNull();
+                        assertThat(entry.expiration().toEpochMilli()).isEqualTo(futureExp.toEpochMilli());
+                    } else {
+                        assertThat(entry.expiration()).isNull();
+                    }
+                }
+            }
+        }
+
+        @Test
+        @DisplayName("Server restart should automatically purge expired permissions from SQLite and not load them")
+        void shouldNotRestoreExpiredPermissionsAfterRestart() throws Exception {
+            try (java.sql.Connection conn = java.sql.DriverManager.getConnection("jdbc:sqlite::memory:")) {
+                DatabasePermissionsHelper.initDatabaseSchema(conn);
+
+                String user = "SpeedyGuy";
+                String activeNode = "avrix.chat.color";
+                String expiredNode = "avrix.expired.boost";
+
+                Instant pastExp = Instant.now().minus(1, ChronoUnit.HOURS);
+                Instant futureExp = Instant.now().plus(1, ChronoUnit.HOURS);
+
+                DatabasePermissionsHelper.savePlayerPermission(conn, user, activeNode, futureExp);
+                DatabasePermissionsHelper.savePlayerPermission(conn, user, expiredNode, pastExp);
+
+                clearManagerCache();
+                assertThat(PermissionsManager.getPlayerPermissions(user)).isEmpty();
+
+                PermissionsManager.loadDatabasePlayerPermissions(conn);
+
+                IsoPlayer player = createMockPlayer(user, 0L, null);
+                assertThat(PermissionsManager.hasPermission(player, activeNode)).isTrue();
+                assertThat(PermissionsManager.hasPermission(player, expiredNode)).isFalse();
+                assertThat(PermissionsManager.getPlayerPermissions(user)).containsExactly(activeNode);
+            }
+        }
+
+        @Test
+        @DisplayName("Revoking permission should delete record from SQLite and prevent restoration after restart")
+        void shouldNotRestoreRevokedPermissionAfterRestart() throws Exception {
+            try (java.sql.Connection conn = java.sql.DriverManager.getConnection("jdbc:sqlite::memory:")) {
+                DatabasePermissionsHelper.initDatabaseSchema(conn);
+
+                String user = "TargetUser";
+                String node = "avrix.temp.access";
+
+                PermissionsManager.grantPermissionToPlayer(user, node);
+                DatabasePermissionsHelper.savePlayerPermission(conn, user, node, null);
+
+                PermissionsManager.revokePermissionFromPlayer(user, node);
+                DatabasePermissionsHelper.deletePlayerPermission(conn, user, node);
+
+                clearManagerCache();
+                PermissionsManager.loadDatabasePlayerPermissions(conn);
+
+                IsoPlayer player = createMockPlayer(user, 0L, null);
+                assertThat(PermissionsManager.hasPermission(player, node)).isFalse();
+                assertThat(PermissionsManager.getPlayerPermissions(user)).isEmpty();
+            }
+        }
+
+        @Test
+        @DisplayName("Temporary permission should persist across first restart, work until expiration, and be purged on second restart")
+        void shouldHandleFullTemporaryPermissionLifecycleAcrossMultipleRestarts() throws Exception {
+            try (java.sql.Connection conn = java.sql.DriverManager.getConnection("jdbc:sqlite::memory:")) {
+                DatabasePermissionsHelper.initDatabaseSchema(conn);
+
+                String user = "TimeTraveler";
+                String node = "avrix.temp.flight";
+                Instant shortExp = Instant.now().plus(100, ChronoUnit.MILLIS);
+
+                PermissionsManager.grantPermissionToPlayer(user, node, shortExp);
+                DatabasePermissionsHelper.savePlayerPermission(conn, user, node, shortExp);
+
+                clearManagerCache();
+                PermissionsManager.loadDatabasePlayerPermissions(conn);
+
+                IsoPlayer player = createMockPlayer(user, 0L, null);
+                assertThat(PermissionsManager.hasPermission(player, node)).isTrue();
+
+                Thread.sleep(150);
+
+                assertThat(PermissionsManager.hasPermission(player, node)).isFalse();
+                assertThat(PermissionsManager.getPlayerPermissions(user)).isEmpty();
+
+                clearManagerCache();
+                PermissionsManager.loadDatabasePlayerPermissions(conn);
+
+                assertThat(PermissionsManager.hasPermission(player, node)).isFalse();
+                assertThat(PermissionsManager.getPlayerPermissions(user)).isEmpty();
+
+                try (java.sql.Statement stat = conn.createStatement();
+                     java.sql.ResultSet rs = stat.executeQuery("SELECT count(*) FROM player_permissions WHERE identifier = '" + user + "'")) {
+                    assertThat(rs.getInt(1)).isZero();
+                }
+            }
+        }
+
+        @Test
+        @DisplayName("Should notify online player via chat when temporary permission expires")
+        void shouldNotifyOnlinePlayerOnPermissionExpiration() throws Exception {
+            String username = "NotifiedUser";
+            String node = "avrix.temp.fly";
+
+            IsoPlayer mockPlayer = createMockPlayer(username, 0L, null);
+            GameServer.server = true;
+            if (GameServer.Players != null) {
+                GameServer.Players.clear();
+                GameServer.Players.add(mockPlayer);
+            }
+
+            try {
+                PermissionsManager.grantPermissionToPlayer(username, node, 50, TimeUnit.MILLISECONDS);
+                assertThat(PermissionsManager.hasPermission(mockPlayer, node)).isTrue();
+
+                Thread.sleep(80);
+
+                PermissionsManager.checkAllExpiredPermissions();
+
+                assertThat(PermissionsManager.hasPermission(mockPlayer, node)).isFalse();
+                assertThat(PermissionsManager.getPlayerPermissions(username)).isEmpty();
+            } finally {
+                GameServer.server = false;
+                if (GameServer.Players != null) {
+                    GameServer.Players.clear();
+                }
+            }
+        }
+
+        @Test
+        @DisplayName("Should assign temporary role and automatically revert to fallback role after expiration")
+        void shouldRevertTemporaryRoleAfterExpiration() throws Exception {
+            ExtendedRole userRole = PermissionsManager.createRole("user", "Default User", Color.white, List.of());
+            ExtendedRole vipRole = PermissionsManager.createRole("TempVip", "Temporary VIP", Color.white, List.of());
+            String username = "VipPlayer";
+
+            IsoPlayer player = createMockPlayer(username, 0L, null);
+
+            GameServer.server = true;
+
+            GameServer.Players.clear();
+            GameServer.Players.add(player);
+
+            try {
+                boolean assigned = PermissionsManager.assignTemporaryRole(username, "TempVip", 60, TimeUnit.MILLISECONDS, "user");
+                assertThat(assigned).isTrue();
+                Mockito.verify(player).setRole(vipRole);
+
+                Thread.sleep(100);
+
+                PermissionsManager.checkAllExpiredRoles();
+
+                Mockito.verify(player).setRole(userRole);
+            } finally {
+                GameServer.server = false;
+                GameServer.Players.clear();
+            }
+        }
+
+        @Test
+        @DisplayName("Should persist temporary role across server restart and revert if expired during offline")
+        void shouldPersistAndRevertTemporaryRoleAcrossRestart() throws Exception {
+            try (java.sql.Connection conn = java.sql.DriverManager.getConnection("jdbc:sqlite::memory:")) {
+                // Create required SQLite schema stubs
+                try (java.sql.Statement stat = conn.createStatement()) {
+                    stat.executeUpdate("""
+                            CREATE TABLE IF NOT EXISTS users (
+                                username TEXT PRIMARY KEY,
+                                role TEXT
+                            )
+                            """);
+                }
+                DatabasePermissionsHelper.initDatabaseSchema(conn);
+
+                ExtendedRole vipRole = PermissionsManager.createRole("RestartVip", "VIP", Color.white, List.of());
+                String username = "OfflineVipUser";
+
+                Instant shortExp = Instant.now().plus(100, ChronoUnit.MILLIS);
+                try (java.sql.PreparedStatement stat = conn.prepareStatement("INSERT INTO users (username, role) VALUES (?, ?)")) {
+                    stat.setString(1, username);
+                    stat.setString(2, "RestartVip");
+                    stat.executeUpdate();
+                }
+                DatabasePermissionsHelper.saveTemporaryRole(conn, username, "RestartVip", shortExp, "user");
+
+                Map<String, TemporaryRoleEntry> tempRolesMap = new java.util.concurrent.ConcurrentHashMap<>();
+                DatabasePermissionsHelper.loadAllTemporaryRoles(conn, tempRolesMap);
+                assertThat(tempRolesMap).containsKey(username);
+                assertThat(tempRolesMap.get(username).roleName()).isEqualTo("RestartVip");
+
+                Thread.sleep(150);
+
+                tempRolesMap.clear();
+                DatabasePermissionsHelper.loadAllTemporaryRoles(conn, tempRolesMap);
+
+                assertThat(tempRolesMap).doesNotContainKey(username);
+
+                try (java.sql.Statement stat = conn.createStatement();
+                     java.sql.ResultSet rs = stat.executeQuery("SELECT role FROM users WHERE username = '" + username + "'")) {
+                    assertThat(rs.next()).isTrue();
+                    assertThat(rs.getString("role")).isEqualTo("user");
+                }
+            }
+        }
+
+        @Test
+        @DisplayName("Overriding temporary role with permanent role should clear temporary record")
+        void shouldClearTemporaryRecordWhenAssignedPermanently() throws Exception {
+            ExtendedRole modRole = PermissionsManager.createRole("TempMod", "Mod", Color.white, List.of());
+            ExtendedRole adminRole = PermissionsManager.createRole("PermAdmin", "Admin", Color.white, List.of());
+            String username = "PromotedUser";
+
+            IsoPlayer player = createMockPlayer(username, 0L, null);
+
+            GameServer.server = true;
+            
+            GameServer.Players.clear();
+            GameServer.Players.add(player);
+
+            try {
+                PermissionsManager.assignTemporaryRole(username, "TempMod", 1, TimeUnit.HOURS, "user");
+                Mockito.verify(player).setRole(modRole);
+
+                PermissionsManager.assignRole(username, "PermAdmin");
+                Mockito.verify(player).setRole(adminRole);
+
+                PermissionsManager.checkAllExpiredRoles();
+
+                Mockito.verify(player, Mockito.never()).setRole(Roles.getRole("user"));
+            } finally {
+                GameServer.server = false;
+                GameServer.Players.clear();
+            }
+        }
     }
 
     // =========================================================================
@@ -668,25 +935,33 @@ class PermissionsManagerTest {
         }
 
         @Test
-        @DisplayName("deleteRole should remove custom role and protect read-only roles")
+        @DisplayName("deleteRole should remove custom role and protect immutable root and read-only roles")
         void shouldHandleRoleDeletionSafely() {
             ExtendedRole custom = PermissionsManager.createRole("TempRole", "To Delete", Color.white, List.of());
             assertThat(Roles.getRole("TempRole")).isNotNull();
 
             boolean deleted = PermissionsManager.deleteRole("TempRole", "Admin");
             assertThat(deleted).isTrue();
+            assertThat(Roles.getRole("TempRole")).isNull();
 
-            // Read-only role protection
-            ExtendedRole readOnlyRole = new ExtendedRole("SystemProtected");
+            assertThat(PermissionsManager.deleteRole("user", "Admin")).isFalse();
+            assertThat(PermissionsManager.deleteRole("banned", "Admin")).isFalse();
+            assertThat(PermissionsManager.deleteRole("USER", "Admin")).isFalse();
+            assertThat(PermissionsManager.deleteRole("Banned", "Admin")).isFalse();
+
+            ExtendedRole readOnlyRole = new ExtendedRole("SystemProtected", "Protected role", Color.white);
             readOnlyRole.setReadOnly();
             Roles.getRoles().add(readOnlyRole);
 
             boolean deletedReadOnly = PermissionsManager.deleteRole("SystemProtected", "Admin");
             assertThat(deletedReadOnly).isFalse();
+            assertThat(Roles.getRole("SystemProtected")).isNotNull();
 
-            // Non-existent role
+            Roles.getRoles().remove(readOnlyRole);
+
             assertThat(PermissionsManager.deleteRole("NonExistentRole", "Admin")).isFalse();
             assertThat(PermissionsManager.deleteRole("   ", "Admin")).isFalse();
+            assertThat(PermissionsManager.deleteRole(null, "Admin")).isFalse();
         }
 
         @Test

@@ -22,15 +22,19 @@ import zombie.debug.LogSeverity;
 import zombie.network.GameServer;
 import zombie.network.PacketTypes;
 import zombie.network.ServerWorldDatabase;
+import zombie.network.chat.ChatServer;
 import zombie.network.packets.INetworkPacket;
 
 import java.io.IOException;
 import java.lang.reflect.Field;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.sql.Connection;
 import java.time.Instant;
 import java.util.*;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.Executors;
+import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.TimeUnit;
 import java.util.stream.Collectors;
 
@@ -40,23 +44,135 @@ import java.util.stream.Collectors;
  * SteamID64 identity mapping, and fine-grained authorization evaluations.
  */
 public final class PermissionsManager {
-
     private static final Logger LOGGER = LoggerFactory.getLogger(PermissionsManager.class);
+
     private static final String PERMISSIONS_FILE = "permissions.yml";
 
-    /**
-     * Map of normalized username/SteamID -> configured primary group name from permissions.yml.
-     */
     private static final Map<String, String> CONFIGURED_USER_GROUPS = new ConcurrentHashMap<>();
-
-    /**
-     * In-memory storage for user-specific custom permissions mapped by normalized identifier (username or SteamID64).
-     * Maps: Normalized Identifier -> (Normalized Node -> PlayerPermission record).
-     */
     private static final Map<String, Map<String, PlayerPermission>> CUSTOM_PLAYER_PERMISSIONS = new ConcurrentHashMap<>();
+    private static final Map<String, TemporaryRoleEntry> TEMPORARY_USER_ROLES = new ConcurrentHashMap<>();
 
     private PermissionsManager() {
         throw new UnsupportedOperationException("Utility class cannot be instantiated");
+    }
+
+    private static final ScheduledExecutorService EXPIRATION_SCHEDULER = Executors.newSingleThreadScheduledExecutor(r -> {
+        Thread thread = new Thread(r, "Avrix-Permissions-Expiry-Tracker");
+        thread.setDaemon(true);
+        return thread;
+    });
+
+    static {
+        EXPIRATION_SCHEDULER.scheduleAtFixedRate(() -> {
+            try {
+                checkAllExpiredPermissions();
+                checkAllExpiredRoles();
+            } catch (Throwable t) {
+                LOGGER.error("Error occurred during periodic permissions/roles expiry check", t);
+            }
+        }, 15, 15, TimeUnit.SECONDS);
+    }
+
+    /**
+     * Periodic scanner across all active cached permissions.
+     */
+    public static void checkAllExpiredPermissions() {
+        for (Map.Entry<String, Map<String, PlayerPermission>> entry : CUSTOM_PLAYER_PERMISSIONS.entrySet()) {
+            evictExpiredPermissions(entry.getKey(), entry.getValue());
+        }
+    }
+
+    /**
+     * Assigns a temporary role with a duration (e.g. 7 DAYS).
+     */
+    public static boolean assignTemporaryRole(String identifier, String roleName, long duration, TimeUnit unit, String fallbackRole) {
+        if (duration <= 0 || unit == null) {
+            return assignRole(identifier, roleName);
+        }
+        return assignTemporaryRole(identifier, roleName, Instant.now().plusMillis(unit.toMillis(duration)), fallbackRole);
+    }
+
+    /**
+     * Assigns a temporary role expiring at a specific timestamp.
+     */
+    public static boolean assignTemporaryRole(String identifier, String roleName, Instant expiration, String fallbackRole) {
+        if (identifier == null || identifier.isBlank() || roleName == null || roleName.isBlank()) {
+            return false;
+        }
+
+        String fallback = fallbackRole != null && !fallbackRole.isBlank() ? fallbackRole : "user";
+
+        boolean success = assignRole(identifier, roleName);
+        if (!success) return false;
+
+        String key = normalizeIdentifier(identifier);
+        TEMPORARY_USER_ROLES.put(key, new TemporaryRoleEntry(roleName, expiration, fallback));
+
+        if (GameServer.server && ServerWorldDatabase.instance != null) {
+            try {
+                Field connField = ServerWorldDatabase.class.getDeclaredField("conn");
+                connField.setAccessible(true);
+                Connection conn = (Connection) connField.get(ServerWorldDatabase.instance);
+                DatabasePermissionsHelper.saveTemporaryRole(conn, key, roleName, expiration, fallback);
+            } catch (Exception ex) {
+                LOGGER.error("Failed to persist temporary role in SQLite for user '{}'", key, ex);
+            }
+        }
+        return true;
+    }
+
+    /**
+     * Periodic check to evict expired roles and revert players back to fallback role.
+     */
+    public static void checkAllExpiredRoles() {
+        if (TEMPORARY_USER_ROLES.isEmpty()) return;
+
+        Iterator<Map.Entry<String, TemporaryRoleEntry>> it = TEMPORARY_USER_ROLES.entrySet().iterator();
+        while (it.hasNext()) {
+            Map.Entry<String, TemporaryRoleEntry> entry = it.next();
+            TemporaryRoleEntry tempRole = entry.getValue();
+
+            if (tempRole.isExpired()) {
+                it.remove();
+                String identifier = entry.getKey();
+                String fallback = tempRole.fallbackRole();
+
+                assignRole(identifier, fallback);
+
+                // Delete from SQLite
+                if (GameServer.server && ServerWorldDatabase.instance != null) {
+                    try {
+                        Field connField = ServerWorldDatabase.class.getDeclaredField("conn");
+                        connField.setAccessible(true);
+                        Connection conn = (Connection) connField.get(ServerWorldDatabase.instance);
+                        DatabasePermissionsHelper.deleteTemporaryRole(conn, identifier);
+                    } catch (Exception ex) {
+                        LOGGER.error("Failed to delete expired temporary role from SQLite for user '{}'", identifier, ex);
+                    }
+                }
+
+                notifyRoleExpired(identifier, tempRole.roleName(), fallback);
+                LOGGER.info("Temporary role '{}' expired for user '{}'. Reverted to '{}'", tempRole.roleName(), identifier, fallback);
+            }
+        }
+    }
+
+    private static void notifyRoleExpired(String identifier, String oldRole, String newRole) {
+        if (!GameServer.server || GameServer.Players == null) return;
+
+        for (int i = 0; i < GameServer.Players.size(); i++) {
+            IsoPlayer p = GameServer.Players.get(i);
+            if (p != null && (identifier.equalsIgnoreCase(p.getUsername()) || identifier.equals(getSteamID(p)))) {
+                UdpConnection conn = GameServer.getConnectionFromPlayer(p);
+                if (conn != null && ChatServer.getInstance() != null) {
+                    ChatServer.getInstance().sendMessageToServerChat(
+                            conn,
+                            String.format("Your temporary role '%s' has expired. You are now '%s'.", oldRole, newRole)
+                    );
+                }
+                break;
+            }
+        }
     }
 
     /**
@@ -166,9 +282,6 @@ public final class PermissionsManager {
                     if (existingRole != null) {
                         extendedRole.setId(existingRole.getId());
                         extendedRole.setPosition(existingRole.getPosition());
-                        if (existingRole.isReadOnly()) {
-                            extendedRole.setReadOnly();
-                        }
                     }
 
                     if (allRoles != null) {
@@ -178,6 +291,10 @@ public final class PermissionsManager {
                             allRoles.add(extendedRole);
                         }
                     }
+                }
+
+                if (isImmutableRole(roleName)) {
+                    extendedRole.setReadOnly();
                 }
 
                 extendedRole.setPrefix(rCfg.prefix());
@@ -232,7 +349,7 @@ public final class PermissionsManager {
                     rCfg.metadata().forEach(extendedRole::setMeta);
                 }
 
-                LOGGER.info("Configured role '{}' [ID: {}, Pos: {}] -> Prefix: '{}', Suffix: '{}', Caps: {}, Perms: {}, Parents: {}",
+                LOGGER.debug("Configured role '{}' [ID: {}, Pos: {}] -> Prefix: '{}', Suffix: '{}', Caps: {}, Perms: {}, Parents: {}",
                         roleName,
                         extendedRole.getId(),
                         extendedRole.getPosition(),
@@ -270,7 +387,7 @@ public final class PermissionsManager {
                 if (uCfg.group() != null && !uCfg.group().isBlank()) {
                     String grp = uCfg.group().strip();
                     CONFIGURED_USER_GROUPS.put(identifier, grp);
-                    LOGGER.info("Mapped user '{}' -> Configured Group: '{}'", rawIdentifier, grp);
+                    LOGGER.debug("Mapped user '{}' -> Configured Group: '{}'", rawIdentifier, grp);
                 }
 
                 if (uCfg.permissions() != null) {
@@ -300,19 +417,33 @@ public final class PermissionsManager {
     }
 
     /**
+     * Checks whether the role is a permanent immutable root role.
+     */
+    public static boolean isImmutableRole(String roleName) {
+        if (roleName == null || roleName.isBlank()) return false;
+        String name = roleName.strip().toLowerCase(Locale.ROOT);
+        return "user".equals(name) || "banned".equals(name);
+    }
+
+    /**
      * Ensures a connecting player receives their YAML-configured group if defined.
      *
      * @param connection the client UDP connection
      */
     public static void syncPlayerLoginRole(IsoPlayer player, UdpConnection connection) {
-        if (player == null && connection == null) return;
+        if (player == null && connection == null) {
+            return;
+        }
 
-        String rawUsername = player != null && player.getUsername() != null
-                ? player.getUsername()
-                : (connection != null && connection.getUserName() != null ? connection.getUserName() : "");
+        String rawUsername = (player != null && player.getUsername() != null && !player.getUsername().isBlank())
+                ? player.getUsername().strip()
+                : (connection != null && connection.getUserName() != null && !connection.getUserName().isBlank()
+                ? connection.getUserName().strip()
+                : "");
 
         String lookupKey = normalizeIdentifier(rawUsername);
-        long steamId = connection != null ? connection.getSteamId() : player.getSteamID();
+
+        long steamId = connection != null ? connection.getSteamId() : (player != null ? player.getSteamID() : 0L);
         String steamIdStr = steamId != 0L ? Long.toUnsignedString(steamId) : null;
 
         String targetGroup = null;
@@ -322,17 +453,27 @@ public final class PermissionsManager {
             targetGroup = CONFIGURED_USER_GROUPS.get(steamIdStr);
         }
 
-        if (targetGroup != null) {
-            Role role = findRole(targetGroup);
-            if (role != null) {
-                if (player != null) {
-                    assignRole(player, targetGroup);
-                } else {
-                    assignRole(connection, targetGroup);
-                }
-                LOGGER.info("Successfully applied YAML-configured role '{}' to user '{}'", targetGroup, rawUsername);
-            }
+        Role role = findRole(targetGroup);
+        if (role == null) {
+            LOGGER.warn("Configured role '{}' for user '{}' not found in registered roles registry", targetGroup, rawUsername);
+            return;
         }
+
+        Role oldRole = player != null ? player.getRole() : (connection != null ? connection.getRole() : null);
+
+        if (connection != null) {
+            connection.setRole(role);
+        }
+        if (player != null) {
+            player.setRole(role);
+        }
+
+        if (!rawUsername.isBlank()) {
+            persistUserRole(rawUsername, role);
+        }
+
+        LOGGER.debug("Synchronized user '{}' (SteamID: {}) to role '{}'", rawUsername, steamIdStr, role.getName());
+        EventManager.invoke(ServerEvents.PLAYER_ROLE_ASSIGNED, player, oldRole, role);
     }
 
     /**
@@ -372,7 +513,7 @@ public final class PermissionsManager {
                   admin:
                     description: "Server Administrator with full root access"
                     color: "255,50,50,255"
-                    prefix: "[Admin] "
+                    prefix: "Admin "
                     suffix: ""
                     permissions:
                       - "*"
@@ -383,7 +524,7 @@ public final class PermissionsManager {
                   moderator:
                     description: "Server Moderator - all capabilities except core server control"
                     color: "50,255,50,255"
-                    prefix: "[Mod] "
+                    prefix: "Mod "
                     suffix: ""
                     permissions: []
                     capabilities:
@@ -432,7 +573,7 @@ public final class PermissionsManager {
                   priority:
                     description: "Player with server login queue priority"
                     color: "230,230,230,255"
-                    prefix: "[Priority] "
+                    prefix: "Priority "
                     suffix: ""
                     permissions: []
                     capabilities:
@@ -445,8 +586,8 @@ public final class PermissionsManager {
                   vip:
                     description: "VIP Supporter role example"
                     color: "255,215,0,255"
-                    prefix: "[VIP] "
-                    suffix: " ★"
+                    prefix: "VIP "
+                    suffix: ""
                     permissions: []
                     capabilities:
                       - "PriorityLogin"
@@ -463,15 +604,6 @@ public final class PermissionsManager {
                       - "LoginOnServer"
                     parents: []
                 
-                  banned:
-                    description: "Banned role - forbidden from logging in"
-                    color: "128,128,128,255"
-                    prefix: "[Banned] "
-                    suffix: ""
-                    permissions: []
-                    capabilities: []
-                    parents: []
-                
                 users:
                   # Example of assigning a role and personal permissions by Username
                   "Example UserName":
@@ -483,7 +615,7 @@ public final class PermissionsManager {
                   76561198012345678:
                     group: "vip"
                     temporaryPermissions:
-                      "example.temporary.boost": "2026-12-31T23:59:59Z"
+                      "example.temporary.boost": "2026-12-31T23:59:59Z" # ISO 8601
                 """;
         Files.writeString(path, defaultYaml);
     }
@@ -602,13 +734,23 @@ public final class PermissionsManager {
      */
     public static boolean deleteRole(String roleName, String adminName) {
         if (roleName == null || roleName.isBlank()) return false;
-        Role role = findRole(roleName);
-        if (role == null || role.isReadOnly()) return false;
+        if (isImmutableRole(roleName)) {
+            LOGGER.warn("Attempted to delete immutable system role: '{}'", roleName);
+            return false;
+        }
 
-        Roles.getRoles().remove(role);
+        Role role = findRole(roleName);
+        if (role == null || role.isReadOnly()) {
+            return false;
+        }
 
         if (GameServer.server) {
             Roles.deleteRole(role.getName(), adminName != null ? adminName : "Server");
+        } else {
+            List<Role> allRoles = Roles.getRoles();
+            if (allRoles != null) {
+                allRoles.remove(role);
+            }
         }
         return true;
     }
@@ -690,6 +832,8 @@ public final class PermissionsManager {
         String clean = normalizeIdentifier(identifier);
         Role role = findRole(roleName);
         if (role == null) return false;
+
+        TEMPORARY_USER_ROLES.remove(normalizeIdentifier(identifier));
 
         if (GameServer.server) {
             if (GameServer.Players != null) {
@@ -802,6 +946,18 @@ public final class PermissionsManager {
                 .computeIfAbsent(userKey, _ -> new ConcurrentHashMap<>())
                 .put(nodeKey, record);
 
+        // Persist into SQLite database
+        if (GameServer.server && ServerWorldDatabase.instance != null) {
+            try {
+                Field connField = ServerWorldDatabase.class.getDeclaredField("conn");
+                connField.setAccessible(true);
+                Connection conn = (Connection) connField.get(ServerWorldDatabase.instance);
+                DatabasePermissionsHelper.savePlayerPermission(conn, userKey, nodeKey, expirationDate);
+            } catch (Exception ex) {
+                LOGGER.error("Failed to persist permission '{}' for user '{}' into SQLite", nodeKey, userKey, ex);
+            }
+        }
+
         EventManager.invoke(ServerEvents.PERMISSION_GRANTED, identifier, permissionNode, expirationDate);
         return true;
     }
@@ -823,10 +979,97 @@ public final class PermissionsManager {
 
         Map<String, PlayerPermission> userNodes = CUSTOM_PLAYER_PERMISSIONS.get(userKey);
         if (userNodes != null && userNodes.remove(nodeKey) != null) {
+            // Remove from SQLite database
+            if (GameServer.server && ServerWorldDatabase.instance != null) {
+                try {
+                    Field connField = ServerWorldDatabase.class.getDeclaredField("conn");
+                    connField.setAccessible(true);
+                    Connection conn = (Connection) connField.get(ServerWorldDatabase.instance);
+                    DatabasePermissionsHelper.deletePlayerPermission(conn, userKey, nodeKey);
+                } catch (Exception ex) {
+                    LOGGER.error("Failed to delete permission '{}' for user '{}' from SQLite", nodeKey, userKey, ex);
+                }
+            }
+
             EventManager.invoke(ServerEvents.PERMISSION_REVOKED, identifier, permissionNode);
             return true;
         }
         return false;
+    }
+
+    /**
+     * Loads all persistent player permissions from SQLite into RAM cache.
+     */
+    public static void loadDatabasePlayerPermissions(Connection conn) {
+        DatabasePermissionsHelper.loadAllPlayerPermissions(conn, CUSTOM_PLAYER_PERMISSIONS);
+    }
+
+    /**
+     * Evicts expired permissions for the specified user, removes them from SQLite,
+     * fires revocation events, and sends an in-game notification if the player is online.
+     *
+     * @param userKey normalized username or SteamID64
+     * @param nodes   user permissions map
+     */
+    private static void evictExpiredPermissions(String userKey, Map<String, PlayerPermission> nodes) {
+        if (nodes == null || nodes.isEmpty()) {
+            return;
+        }
+
+        Iterator<Map.Entry<String, PlayerPermission>> iterator = nodes.entrySet().iterator();
+        while (iterator.hasNext()) {
+            Map.Entry<String, PlayerPermission> entry = iterator.next();
+            PlayerPermission perm = entry.getValue();
+
+            if (perm != null && perm.isExpired()) {
+                iterator.remove();
+                String node = entry.getKey();
+
+                if (GameServer.server && ServerWorldDatabase.instance != null) {
+                    try {
+                        Field connField = ServerWorldDatabase.class.getDeclaredField("conn");
+                        connField.setAccessible(true);
+                        Connection conn = (Connection) connField.get(ServerWorldDatabase.instance);
+                        DatabasePermissionsHelper.deletePlayerPermission(conn, userKey, node);
+                    } catch (Exception ex) {
+                        LOGGER.error("Failed to delete expired permission '{}' for user '{}' from SQLite", node, userKey, ex);
+                    }
+                }
+
+                notifyPlayerExpired(userKey, node);
+
+                EventManager.invoke(ServerEvents.PERMISSION_REVOKED, userKey, node);
+                LOGGER.debug("Temporary permission '{}' expired and was evicted for user '{}'", node, userKey);
+            }
+        }
+    }
+
+    /**
+     * Sends an in-game chat message to an online player when their permission expires.
+     */
+    private static void notifyPlayerExpired(String identifier, String node) {
+        if (!GameServer.server || GameServer.Players == null) {
+            return;
+        }
+
+        for (int i = 0; i < GameServer.Players.size(); i++) {
+            IsoPlayer player = GameServer.Players.get(i);
+            if (player != null && player.getUsername() != null) {
+                String pName = normalizeIdentifier(player.getUsername());
+                String pSteam = getSteamID(player);
+
+                if (identifier.equalsIgnoreCase(pName) || identifier.equals(pSteam)) {
+                    UdpConnection connection = GameServer.getConnectionFromPlayer(player);
+                    if (connection != null && ChatServer.getInstance() != null) {
+                        ChatServer.getInstance().sendMessageToServerChat(
+                                connection,
+                                String.format("Your temporary permission '%s' has expired.", node)
+                        );
+                    }
+                    break;
+                }
+            }
+        }
     }
 
     /**
@@ -927,7 +1170,7 @@ public final class PermissionsManager {
         Map<String, PlayerPermission> nodes = CUSTOM_PLAYER_PERMISSIONS.get(key);
         if (nodes == null || nodes.isEmpty()) return false;
 
-        nodes.values().removeIf(PlayerPermission::isExpired);
+        evictExpiredPermissions(key, nodes);
 
         if (negationCheck) {
             if (nodes.containsKey("-" + target)) return true;
