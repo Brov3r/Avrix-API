@@ -31,7 +31,7 @@ dependencies {
 
     testImplementation(fileTree(dir: 'libs', include: '*.jar'))
     testRuntimeOnly 'org.junit.platform:junit-platform-launcher'
-    testRuntimeOnly 'org.slf4j:slf4j-simple:2.0.18'
+    testRuntimeOnly 'org.slf4j:slf4j-simple:2.0.20'
 }
 
 java {
