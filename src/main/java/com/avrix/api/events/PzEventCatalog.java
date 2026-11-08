@@ -3,7 +3,6 @@ package com.avrix.api.events;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import zombie.Lua.LuaEventManager;
-import zombie.Lua.LuaManager;
 
 import java.util.Collections;
 import java.util.LinkedHashSet;
