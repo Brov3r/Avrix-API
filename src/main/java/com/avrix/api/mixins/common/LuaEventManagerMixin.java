@@ -2,6 +2,7 @@ package com.avrix.api.mixins.common;
 
 import com.avrix.api.events.EventManager;
 import com.avrix.api.events.PzEventBridge;
+import com.avrix.api.lua.script.LuaScriptLoader;
 import net.lenni0451.classtransform.annotations.CTarget;
 import net.lenni0451.classtransform.annotations.CTransformer;
 import net.lenni0451.classtransform.annotations.injection.CInject;
@@ -19,7 +20,11 @@ import zombie.Lua.LuaEventManager;
 public class LuaEventManagerMixin {
 
     /**
-     * Injects {@code EventManager.invoke(event)} into {@code triggerEvent(String)}.
+     * Injects {@code EventManager.invoke(event)} into {@code triggerEvent(String)} and starts
+     * the late custom Lua load phase for {@code OnGameBoot}.
+     * <p>
+     * The {@code OnGameBoot} hook is placed here because dedicated servers do not run
+     * {@code LuaEventManager.RunQueuedEvents()} and may skip Lua event callbacks entirely.
      * Descriptor: {@code (Ljava/lang/String;)V}
      *
      * @param event The event identifier
@@ -30,6 +35,9 @@ public class LuaEventManagerMixin {
     )
     private static void inject0(String event) {
         PzEventBridge.dispatch(event);
+        if ("OnGameBoot".equals(event)) {
+            LuaScriptLoader.onGameBoot();
+        }
     }
 
     /**
@@ -189,6 +197,7 @@ public class LuaEventManagerMixin {
     )
     private static void drainQueuedJavaEvents() {
         PzEventBridge.drain();
+        LuaScriptLoader.drainLate();
     }
 
     /**

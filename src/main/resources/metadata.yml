@@ -15,7 +15,9 @@ dependencies:
 entrypoint: ""
 mixins:
   # Common: active on both client and dedicated server.
+  - "com.avrix.api.mixins.common.LuaManagerMixin"
   - "com.avrix.api.mixins.common.LuaEventManagerMixin"
+  - "com.avrix.api.mixins.common.LuaRequireMixin"
   # Server-only game systems.
   - "com.avrix.api.mixins.server.GameServerEventsMixin"
   - "com.avrix.api.mixins.server.GameServerCommandsMixin"

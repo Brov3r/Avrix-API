@@ -3,6 +3,7 @@ package com.avrix.api.mixins.server;
 import com.avrix.api.events.EventManager;
 import com.avrix.api.events.PzEventBridge;
 import com.avrix.api.events.ServerEvents;
+import com.avrix.api.lua.script.LuaScriptLoader;
 import net.lenni0451.classtransform.annotations.CTarget;
 import net.lenni0451.classtransform.annotations.CTransformer;
 import net.lenni0451.classtransform.annotations.injection.CInject;
@@ -83,7 +84,7 @@ public class GameServerEventsMixin {
     }
 
     /**
-     * Drains Java events that were queued by game events triggered from non-main threads.
+     * Drains Java events and late Lua loads that were queued from non-main threads.
      */
     @CInject(
             method = "mainLoopDealWithNetData(Lzombie/network/ZomboidNetData;)V",
@@ -91,5 +92,6 @@ public class GameServerEventsMixin {
     )
     private static void drainQueuedJavaEvents(ZomboidNetData data) {
         PzEventBridge.drain();
+        LuaScriptLoader.drainLate();
     }
 }
