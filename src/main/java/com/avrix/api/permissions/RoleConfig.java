@@ -3,7 +3,9 @@ package com.avrix.api.permissions;
 import org.spongepowered.configurate.objectmapping.ConfigSerializable;
 import org.spongepowered.configurate.objectmapping.meta.Comment;
 
+import java.util.ArrayList;
 import java.util.Collections;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 
@@ -16,7 +18,8 @@ import java.util.Map;
  * @param suffix       visual chat and name suffix displayed after the player's name
  * @param permissions  collection of string permission nodes granted to this group (supports {@code "-node"} negation)
  * @param capabilities collection of native Project Zomboid {@link zombie.characters.Capability} enum names granted to this role
- * @param parents      collection of parent group names from which this role inherits permissions and metadata
+ * @param parents      collection of parent group names from which this role inherits permissions and metadata;
+ *                     native capabilities are not inherited and must be listed explicitly
  * @param metadata     arbitrary key-value metadata storage associated with this role
  */
 @ConfigSerializable
@@ -63,9 +66,17 @@ public record RoleConfig(
         color = (color != null && !color.isBlank()) ? color : "255,255,255,255";
         prefix = (prefix != null) ? prefix : "";
         suffix = (suffix != null) ? suffix : "";
-        permissions = (permissions != null) ? Collections.unmodifiableList(permissions) : Collections.emptyList();
-        capabilities = (capabilities != null) ? Collections.unmodifiableList(capabilities) : Collections.emptyList();
-        parents = (parents != null) ? Collections.unmodifiableList(parents) : Collections.emptyList();
-        metadata = (metadata != null) ? Collections.unmodifiableMap(metadata) : Collections.emptyMap();
+        permissions = (permissions != null)
+                ? Collections.unmodifiableList(new ArrayList<>(permissions))
+                : Collections.emptyList();
+        capabilities = (capabilities != null)
+                ? Collections.unmodifiableList(new ArrayList<>(capabilities))
+                : Collections.emptyList();
+        parents = (parents != null)
+                ? Collections.unmodifiableList(new ArrayList<>(parents))
+                : Collections.emptyList();
+        metadata = (metadata != null)
+                ? Collections.unmodifiableMap(new LinkedHashMap<>(metadata))
+                : Collections.emptyMap();
     }
 }

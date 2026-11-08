@@ -33,10 +33,29 @@ public final class EventManager {
     private static final Logger LOGGER = LoggerFactory.getLogger(EventManager.class);
     private static final HandlerInvoker[] EMPTY_HANDLERS = new HandlerInvoker[0];
 
+    /**
+     * Highest listener priority; handlers run before all lower priorities.
+     */
     public static final int PRIORITY_HIGHEST = 1000;
+
+    /**
+     * High listener priority.
+     */
     public static final int PRIORITY_HIGH = 100;
+
+    /**
+     * Default listener priority.
+     */
     public static final int PRIORITY_NORMAL = 0;
+
+    /**
+     * Low listener priority.
+     */
     public static final int PRIORITY_LOW = -100;
+
+    /**
+     * Lowest listener priority; handlers run after all higher priorities.
+     */
     public static final int PRIORITY_LOWEST = -1000;
 
     /**

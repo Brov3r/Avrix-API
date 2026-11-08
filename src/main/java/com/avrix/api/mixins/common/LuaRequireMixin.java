@@ -18,6 +18,13 @@ import java.util.Optional;
 public class LuaRequireMixin {
 
     /**
+     * Prevents instantiation of the transformer class.
+     */
+    private LuaRequireMixin() {
+        throw new UnsupportedOperationException("Mixin classes cannot be instantiated");
+    }
+
+    /**
      * Intercepts {@code require} and returns a custom module when one is available.
      * <p>
      * When no custom source contains the module, the original game implementation runs

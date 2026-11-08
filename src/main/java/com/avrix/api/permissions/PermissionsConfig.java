@@ -4,6 +4,7 @@ import org.spongepowered.configurate.objectmapping.ConfigSerializable;
 import org.spongepowered.configurate.objectmapping.meta.Comment;
 
 import java.util.Collections;
+import java.util.LinkedHashMap;
 import java.util.Map;
 
 /**
@@ -28,7 +29,11 @@ public record PermissionsConfig(
      * @param users  map of user identifiers to user-specific configurations
      */
     public PermissionsConfig {
-        groups = (groups != null) ? Collections.unmodifiableMap(groups) : Collections.emptyMap();
-        users = (users != null) ? Collections.unmodifiableMap(users) : Collections.emptyMap();
+        groups = (groups != null)
+                ? Collections.unmodifiableMap(new LinkedHashMap<>(groups))
+                : Collections.emptyMap();
+        users = (users != null)
+                ? Collections.unmodifiableMap(new LinkedHashMap<>(users))
+                : Collections.emptyMap();
     }
 }

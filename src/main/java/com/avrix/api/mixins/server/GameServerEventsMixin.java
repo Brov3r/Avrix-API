@@ -21,6 +21,14 @@ import zombie.network.ZomboidNetData;
  */
 @CTransformer(value = GameServer.class)
 public class GameServerEventsMixin {
+
+    /**
+     * Prevents instantiation of the transformer class.
+     */
+    private GameServerEventsMixin() {
+        throw new UnsupportedOperationException("Mixin classes cannot be instantiated");
+    }
+
     /**
      * Injects into {@link GameServer#receiveClientConnect(UdpConnection, ServerWorldDatabase.LogonResult)}
      * after a free slot has been assigned to the client.

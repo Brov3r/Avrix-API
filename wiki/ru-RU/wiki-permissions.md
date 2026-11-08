@@ -113,6 +113,9 @@ users:
       "avrix.boost.experience": "2026-12-31T23:59:59Z"
 ```
 
+> Блок `users` выше — пример. Автоматически созданный файл содержит пустой `users: {}`, поэтому свежая
+> установка не выдаёт повышенные права реальным игрокам.
+
 ---
 
 ### Программное создание и модификация ролей (`ExtendedRole`)
@@ -173,21 +176,15 @@ public class ExamplePlugin implements Plugin {
 ### Назначение ролей игрокам и сокетам
 
 ```java
-// 1. Живому объекту игрока (синхронизирует сущность, сеть и БД)
+// 1. Живому объекту игрока (использует ванильный pipeline смены роли, когда он доступен)
 PermissionsManager.assignRole(player, "admin");
 
 // 2. Сетевому соединению UdpConnection
-PermissionsManager.
-
-assignRole(connection, "moderator");
+PermissionsManager.assignRole(connection, "moderator");
 
 // 3. По имени пользователя или SteamID64 (для онлайн-игроков и обновления БД)
-PermissionsManager.
-
-assignRole("Brov3r","admin");
-PermissionsManager.
-
-assignRole("76561198012345678","vip");
+PermissionsManager.assignRole("Brov3r", "admin");
+PermissionsManager.assignRole("76561198012345678", "vip");
 ```
 
 ---
@@ -222,27 +219,19 @@ flowchart TD
 
 ```java
 // Проверка у IsoPlayer
-if(PermissionsManager.hasPermission(player, "avrix.commands.heal")){
-        player.
-
-getBodyDamage().
-
-RestoreToFullHealth();
+if (PermissionsManager.hasPermission(player, "avrix.commands.heal")) {
+    player.getBodyDamage().RestoreToFullHealth();
 }
 
 // Проверка у UdpConnection
-        if(PermissionsManager.
-
-hasPermission(connection, "avrix.admin.panel")){
-        // Отправка пакета интерфейса
-        }
+if (PermissionsManager.hasPermission(connection, "avrix.admin.panel")) {
+    // Отправка пакета интерфейса
+}
 
 // Проверка у Role
-        if(PermissionsManager.
-
-hasPermission(role, "avrix.chat.color")){
-        // Разрешить форматирование чата
-        }
+if (PermissionsManager.hasPermission(role, "avrix.chat.color")) {
+    // Разрешить форматирование чата
+}
 ```
 
 ---
@@ -266,39 +255,31 @@ hasPermission(role, "avrix.chat.color")){
 
 ```java
 import java.time.Instant;
+import java.util.Collection;
 import java.util.concurrent.TimeUnit;
 
 // Постоянное персональное право (по Username или SteamID64)
-PermissionsManager.grantPermissionToPlayer("Brov3r","avrix.special.access");
+PermissionsManager.grantPermissionToPlayer("Brov3r", "avrix.special.access");
 
 // Временное право на 7 дней
-PermissionsManager.
-
-grantPermissionToPlayer("Brov3r","avrix.vip.boost",7,TimeUnit.DAYS);
+PermissionsManager.grantPermissionToPlayer("Brov3r", "avrix.vip.boost", 7, TimeUnit.DAYS);
 
 // Временное право до точной даты ISO-8601
-PermissionsManager.
-
-grantPermissionToPlayer("76561198012345678","avrix.event.2026",Instant.parse("2026-12-31T23:59:59Z"));
+PermissionsManager.grantPermissionToPlayer(
+        "76561198012345678", "avrix.event.2026", Instant.parse("2026-12-31T23:59:59Z"));
 
 // Отзыв права
-        PermissionsManager.
+PermissionsManager.revokePermissionFromPlayer("Brov3r", "avrix.special.access");
 
-revokePermissionFromPlayer("Brov3r","avrix.special.access");
+// Очистка всех прямых прав игрока (включая постоянные записи в БД)
+PermissionsManager.clearPlayerPermissions("Brov3r");
 
 // Получение списка активных записей с проверкой экспирации
 Collection<PlayerPermission> entries = PermissionsManager.getPlayerPermissionEntries("Brov3r");
-for(
-PlayerPermission entry :entries){
-        System.out.
-
-printf("Node: %s, Expired: %s, Expiration: %s%n",
-       entry.node(),entry.
-
-isExpired(),entry.
-
-expirationDate());
-        }
+for (PlayerPermission entry : entries) {
+    System.out.printf("Node: %s, Expired: %s, Expiration: %s%n",
+            entry.node(), entry.isExpired(), entry.expiration());
+}
 ```
 
 ---
@@ -327,3 +308,21 @@ boolean canJoin = PermissionsManager.hasCapability("Brov3r", Capability.LoginOnS
 | `ServerEvents.PLAYER_ROLE_ASSIGNED` | `IsoPlayer player, Role oldRole, Role newRole`    | Вызывается при смене роли игрока                       |
 | `ServerEvents.PERMISSION_GRANTED`   | `String identifier, String node, Instant expires` | Вызывается при выдаче постоянного или временного права |
 | `ServerEvents.PERMISSION_REVOKED`   | `String identifier, String node`                  | Вызывается при отзыве права                            |
+
+---
+
+### Примечания к реализации
+
+- Ролевые отрицания (`-node`, `-branch.*`) работают по принципу deny-overrides для роли и всех родителей.
+- Идентификаторы сравниваются без учёта регистра и хранятся в нижнем регистре; SteamID64 остаются числовыми строками.
+- `duration <= 0` или `null` time unit отклоняются и никогда не превращаются в постоянную выдачу.
+- Сгенерированный `permissions.yml` не содержит активных пользователей и выдач.
+- Временные роли сохраняются и восстанавливаются после рестарта; истёкшие записи откатываются через таблицу `whitelist`.
+- `clearPlayerPermissions` удаляет постоянные записи и публикует `PERMISSION_REVOKED` для каждого узла.
+- Перезагрузка YAML удаляет роли, права, metadata и персональные стили, которых больше нет в конфиге.
+- Родительские роли наследуют кастомные права и metadata, но не нативные capabilities.
+- Персональные `prefix`/`suffix` доступны через `getChatPrefix` и `getChatSuffix`.
+- `loadPermissionsConfig` возвращает `boolean`; неудачная перезагрузка сохраняет предыдущее состояние.
+- Таблицы прав используют отдельное SQLite-соединение с busy timeout; обработка истечения выполняется в главном
+  цикле dedicated-сервера.
+- События истечения публикуются в server thread, когда main-loop hook активен.

@@ -9,7 +9,14 @@ import zombie.Lua.LuaManager;
  */
 final class LuaExposureSupport {
 
+    /**
+     * Field name used by Project Zomboid class tables to store the Java class.
+     */
     static final String CLASS_FIELD_NAME = "class";
+
+    /**
+     * Metatable field name used for method lookup.
+     */
     static final String INDEX_FIELD_NAME = "__index";
 
     private LuaExposureSupport() {

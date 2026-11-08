@@ -53,6 +53,11 @@ public final class LuaRegistration {
         return exposure;
     }
 
+    /**
+     * Returns a diagnostic representation of this registration.
+     *
+     * @return registration description
+     */
     @Override
     public String toString() {
         return "LuaRegistration[" + id + ", " + exposure + "]";

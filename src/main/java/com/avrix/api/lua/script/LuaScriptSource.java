@@ -70,6 +70,11 @@ public sealed interface LuaScriptSource extends AutoCloseable
         return new JarLuaScriptSource(jar, prefix);
     }
 
+    /**
+     * Releases resources held by this source.
+     *
+     * @throws IOException if the source cannot be closed
+     */
     @Override
     void close() throws IOException;
 }

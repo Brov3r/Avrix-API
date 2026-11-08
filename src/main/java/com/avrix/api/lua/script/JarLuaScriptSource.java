@@ -38,11 +38,22 @@ final class JarLuaScriptSource implements LuaScriptSource {
         this.prefix = normalizePrefix(prefix);
     }
 
+    /**
+     * Returns a stable identifier for this JAR source.
+     *
+     * @return source identifier
+     */
     @Override
     public String id() {
         return "jar:" + jarPath + "!/" + prefix;
     }
 
+    /**
+     * Checks whether the JAR contains the given relative Lua path.
+     *
+     * @param relativePath relative Lua path
+     * @return {@code true} if the entry exists
+     */
     @Override
     public boolean contains(String relativePath) {
         try {
@@ -52,6 +63,13 @@ final class JarLuaScriptSource implements LuaScriptSource {
         }
     }
 
+    /**
+     * Opens the given relative Lua path from the JAR.
+     *
+     * @param relativePath relative Lua path
+     * @return entry stream
+     * @throws IOException if the entry does not exist or cannot be opened
+     */
     @Override
     public InputStream open(String relativePath) throws IOException {
         JarEntry entry = ensureOpen().getJarEntry(entryName(relativePath));
@@ -61,6 +79,13 @@ final class JarLuaScriptSource implements LuaScriptSource {
         return ensureOpen().getInputStream(entry);
     }
 
+    /**
+     * Lists Lua entries under the given relative directory.
+     *
+     * @param directory relative directory or an empty string for the root
+     * @return relative Lua paths
+     * @throws IOException if the JAR cannot be read
+     */
     @Override
     public List<String> list(String directory) throws IOException {
         String normalizedDirectory = normalizeDirectory(directory);
@@ -84,6 +109,11 @@ final class JarLuaScriptSource implements LuaScriptSource {
         return files;
     }
 
+    /**
+     * Closes the underlying JAR file.
+     *
+     * @throws IOException if the JAR cannot be closed
+     */
     @Override
     public void close() throws IOException {
         closed = true;
@@ -159,6 +189,11 @@ final class JarLuaScriptSource implements LuaScriptSource {
         return normalized;
     }
 
+    /**
+     * Returns a diagnostic representation of this source.
+     *
+     * @return source description
+     */
     @Override
     public String toString() {
         return id();

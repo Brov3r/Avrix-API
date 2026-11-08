@@ -38,6 +38,11 @@ final class GlobalObjectExposure implements LuaExposure {
         this.target = target;
     }
 
+    /**
+     * Applies the global object exposure to the given Lua environment.
+     *
+     * @param environment target Lua environment
+     */
     @Override
     public void apply(KahluaTable environment) {
         if (appliedIn == environment) {
@@ -90,6 +95,11 @@ final class GlobalObjectExposure implements LuaExposure {
         appliedIn = environment;
     }
 
+    /**
+     * Removes the global object exposure from the given Lua environment.
+     *
+     * @param environment Lua environment to clean up
+     */
     @Override
     public void remove(KahluaTable environment) {
         if (appliedIn != environment) {
@@ -105,22 +115,42 @@ final class GlobalObjectExposure implements LuaExposure {
         invalidate();
     }
 
+    /**
+     * Checks whether this exposure is applied to the given environment.
+     *
+     * @param environment Lua environment to check
+     * @return {@code true} if applied
+     */
     @Override
     public boolean isAppliedIn(KahluaTable environment) {
         return appliedIn == environment;
     }
 
+    /**
+     * Clears environment-specific state after a Lua reset.
+     */
     @Override
     public void invalidate() {
         appliedIn = null;
         exposedValues.clear();
     }
 
+    /**
+     * Checks whether this exposure affects the given Java type.
+     *
+     * @param type Java type
+     * @return always {@code false}
+     */
     @Override
     public boolean affects(Class<?> type) {
         return false;
     }
 
+    /**
+     * Returns a diagnostic representation of this exposure.
+     *
+     * @return exposure description
+     */
     @Override
     public String toString() {
         return "GlobalObjectExposure[" + target.getClass().getName() + "]";

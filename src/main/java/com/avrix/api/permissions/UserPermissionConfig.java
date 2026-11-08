@@ -3,7 +3,9 @@ package com.avrix.api.permissions;
 import org.spongepowered.configurate.objectmapping.ConfigSerializable;
 import org.spongepowered.configurate.objectmapping.meta.Comment;
 
+import java.util.ArrayList;
 import java.util.Collections;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 
@@ -45,8 +47,12 @@ public record UserPermissionConfig(
      */
     public UserPermissionConfig {
         group = (group != null) ? group : "";
-        permissions = (permissions != null) ? Collections.unmodifiableList(permissions) : Collections.emptyList();
-        temporaryPermissions = (temporaryPermissions != null) ? Collections.unmodifiableMap(temporaryPermissions) : Collections.emptyMap();
+        permissions = (permissions != null)
+                ? Collections.unmodifiableList(new ArrayList<>(permissions))
+                : Collections.emptyList();
+        temporaryPermissions = (temporaryPermissions != null)
+                ? Collections.unmodifiableMap(new LinkedHashMap<>(temporaryPermissions))
+                : Collections.emptyMap();
         prefix = (prefix != null) ? prefix : "";
         suffix = (suffix != null) ? suffix : "";
     }

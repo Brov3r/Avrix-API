@@ -15,6 +15,13 @@ import zombie.Lua.LuaManager;
 public class LuaManagerMixin {
 
     /**
+     * Prevents instantiation of the transformer class.
+     */
+    private LuaManagerMixin() {
+        throw new UnsupportedOperationException("Mixin classes cannot be instantiated");
+    }
+
+    /**
      * Reinitializes Avrix Lua state at the end of {@link LuaManager#init()}.
      * <p>
      * The injection point is after the game has created the Lua environment and exposed its

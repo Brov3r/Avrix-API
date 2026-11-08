@@ -131,7 +131,12 @@ public enum ServerEvents implements Event {
 
     private final String eventName;
 
-    ServerEvents(String eventName) {
+    /**
+     * Creates a server event descriptor.
+     *
+     * @param eventName game event name
+     */
+    private ServerEvents(String eventName) {
         this.eventName = eventName;
     }
 
@@ -144,6 +149,11 @@ public enum ServerEvents implements Event {
         return this.eventName;
     }
 
+    /**
+     * Returns the unique Project Zomboid event name.
+     *
+     * @return event name
+     */
     @Override
     public String getName() {
         return this.eventName;

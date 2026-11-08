@@ -43,14 +43,20 @@ public @interface CommandInfo {
     String usage() default "";
 
     /**
-     * Custom string permission nodes required to execute this command (e.g. {@code {"avrix.commands.heal"}}).
+     * Custom string permission nodes that may authorize this command.
+     * <p>
+     * Access is granted when at least one non-blank node matches. When both permissions and capabilities
+     * are declared, either group may grant access.
      *
      * @return array of permission strings
      */
     String[] permission() default {};
 
     /**
-     * Standard Project Zomboid capabilities required.
+     * Standard Project Zomboid capabilities that may authorize this command.
+     * <p>
+     * Access is granted when at least one capability matches. When both permissions and capabilities
+     * are declared, either group may grant access.
      *
      * @return array of native capabilities
      */

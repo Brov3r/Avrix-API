@@ -39,6 +39,11 @@ public record CommandContext(
         this(senderName, CommandSource.fromLegacy(player, connection), player, connection, rawCommand, args);
     }
 
+    /**
+     * Validates required fields and defensively copies positional arguments.
+     *
+     * @throws NullPointerException if {@code senderName}, {@code source} or {@code rawCommand} is {@code null}
+     */
     public CommandContext {
         Objects.requireNonNull(senderName, "Sender name cannot be null");
         Objects.requireNonNull(source, "Command source cannot be null");

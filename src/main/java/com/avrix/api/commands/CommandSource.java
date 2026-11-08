@@ -134,7 +134,7 @@ public record CommandSource(
      * @param connection connection, or {@code null}
      * @return inferred command source
      */
-    static CommandSource fromLegacy(IsoPlayer player, UdpConnection connection) {
+    public static CommandSource fromLegacy(IsoPlayer player, UdpConnection connection) {
         if (player != null) {
             String name = resolvePlayerName(player);
             String address = connection != null ? resolveAddress(connection) : "Client";

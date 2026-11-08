@@ -2281,7 +2281,12 @@ public enum DefaultEvents implements Event {
         LOOKUP_MAP = Collections.unmodifiableMap(map);
     }
 
-    DefaultEvents(String eventName) {
+    /**
+     * Creates a Project Zomboid event descriptor.
+     *
+     * @param eventName game event name
+     */
+    private DefaultEvents(String eventName) {
         this.eventName = eventName;
     }
 

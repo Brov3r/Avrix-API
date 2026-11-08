@@ -226,7 +226,7 @@ return an immutable map and avoid changing it at runtime.
 ### Permissions and Cooldowns
 
 1. **Console and RCON** bypass permission checks and cooldowns.
-2. **OR logic** applies inside `permission` and `capability`.
+2. **OR logic** applies inside `permission`, inside `capability`, and between the two groups.
 3. **AND logic** applies between the root command and a selected subcommand.
 4. Cooldowns are tracked per source identity and per command/subcommand path.
 5. Cooldown checks are atomic and expired entries are pruned periodically.

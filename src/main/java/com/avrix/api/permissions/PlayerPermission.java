@@ -12,9 +12,18 @@ import java.util.Objects;
  */
 public record PlayerPermission(String node, Instant expiration) {
 
+    /**
+     * Validates and normalizes the permission node.
+     *
+     * @throws NullPointerException     if {@code node} is {@code null}
+     * @throws IllegalArgumentException if {@code node} is blank
+     */
     public PlayerPermission {
         Objects.requireNonNull(node, "Permission node cannot be null");
         node = node.strip().toLowerCase(Locale.ROOT);
+        if (node.isEmpty() || "-".equals(node)) {
+            throw new IllegalArgumentException("Permission node cannot be blank");
+        }
     }
 
     /**

@@ -24,8 +24,19 @@ import java.sql.SQLException;
 public class GameServerCommandsMixin {
 
     /**
+     * Prevents instantiation of the transformer class.
+     */
+    private GameServerCommandsMixin() {
+        throw new UnsupportedOperationException("Mixin classes cannot be instantiated");
+    }
+
+    /**
      * Overwrites GameServer#handleServerCommand(String, UdpConnection) to first check
      * the Avrix {@link CommandManager}, and gracefully fall back to native PZ {@link CommandBase}.
+     *
+     * @param input      raw command input
+     * @param connection issuing server connection
+     * @return command result, or {@code null} when PZ should handle the command
      */
     @COverride
     public static String handleServerCommand(String input, UdpConnection connection) {
@@ -45,6 +56,9 @@ public class GameServerCommandsMixin {
             adminUsername = connection.getUserName();
             if (!connection.isCoopHost) {
                 accessLevel = connection.getRole();
+                if (accessLevel == null) {
+                    accessLevel = Roles.getDefaultForUser();
+                }
             }
         }
 

@@ -35,7 +35,14 @@ public final class Config<T> {
     private T data;
     private String rawHeader;
 
-    Config(final Path file, final Class<T> type) {
+    /**
+     * Creates a configuration container for the given file and model type.
+     *
+     * @param file configuration file
+     * @param type configuration model type
+     * @throws NullPointerException if {@code file} or {@code type} is {@code null}
+     */
+    public Config(final Path file, final Class<T> type) {
         this.file = Objects.requireNonNull(file, "File path cannot be null");
         this.type = Objects.requireNonNull(type, "Target type cannot be null");
     }

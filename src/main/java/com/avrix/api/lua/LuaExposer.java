@@ -421,11 +421,22 @@ public final class LuaExposer {
      */
     private record IdentityKey(Object target) {
 
+        /**
+         * Compares registry keys by target identity.
+         *
+         * @param other object to compare
+         * @return {@code true} if both keys reference the same target
+         */
         @Override
         public boolean equals(Object other) {
             return other instanceof IdentityKey key && key.target == target;
         }
 
+        /**
+         * Returns the identity hash code of the target.
+         *
+         * @return identity hash code
+         */
         @Override
         public int hashCode() {
             return System.identityHashCode(target);

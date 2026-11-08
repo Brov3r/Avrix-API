@@ -29,8 +29,8 @@ public interface Subcommand {
     String execute(CommandContext context) throws Exception;
 
     /**
-     * Specific permissions required for this subcommand.
-     * If empty, inherits access from the parent command.
+     * Specific permissions that may authorize this subcommand.
+     * If empty, inherits access from the parent command. Access is granted when at least one node matches.
      *
      * @return array of permission strings
      */
@@ -39,7 +39,9 @@ public interface Subcommand {
     }
 
     /**
-     * Specific capabilities required for this subcommand.
+     * Specific capabilities that may authorize this subcommand.
+     * Access is granted when at least one capability matches. When both permissions and capabilities
+     * are declared, either group may grant access.
      *
      * @return array of native capabilities
      */

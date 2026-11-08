@@ -14,7 +14,11 @@ import zombie.network.ServerWorldDatabase;
 
 import java.lang.reflect.Field;
 import java.sql.Connection;
+import java.sql.PreparedStatement;
+import java.sql.ResultSet;
+import java.sql.SQLException;
 import java.util.ArrayList;
+import java.util.Locale;
 
 /**
  * ClassTransform mixin for {@link ServerWorldDatabase} enabling SQLite persistence
@@ -22,6 +26,13 @@ import java.util.ArrayList;
  */
 @CTransformer(value = ServerWorldDatabase.class)
 public class ServerWorldDatabaseMixin {
+
+    /**
+     * Prevents instantiation of the transformer class.
+     */
+    private ServerWorldDatabaseMixin() {
+        throw new UnsupportedOperationException("Mixin classes cannot be instantiated");
+    }
 
     /**
      * Initializes ExtendedRole database tables and loads permissions.yml
@@ -40,6 +51,7 @@ public class ServerWorldDatabaseMixin {
 
             DatabasePermissionsHelper.initDatabaseSchema(conn);
             PermissionsManager.loadDatabasePlayerPermissions(conn);
+            PermissionsManager.loadDatabaseTemporaryRoles(conn);
         } catch (Exception e) {
             DebugType.General.error("Failed to initialize ExtendedRole schema: " + e.getMessage());
         }
@@ -52,9 +64,12 @@ public class ServerWorldDatabaseMixin {
     private void injectSaveRoleData(Role role) {
         ServerWorldDatabase db = (ServerWorldDatabase) (Object) this;
         try {
-            Field connField = ServerWorldDatabase.class.getDeclaredField("conn");
-            connField.setAccessible(true);
-            Connection conn = (Connection) connField.get(db);
+            Connection conn = DatabasePermissionsHelper.getConnection();
+            if (conn == null) {
+                Field connField = ServerWorldDatabase.class.getDeclaredField("conn");
+                connField.setAccessible(true);
+                conn = (Connection) connField.get(db);
+            }
             DatabasePermissionsHelper.saveCustomRoleData(conn, role);
         } catch (Exception e) {
             DebugType.General.error("Failed to save extended data for role '" + role.getName() + "': " + e.getMessage());
@@ -63,18 +78,40 @@ public class ServerWorldDatabaseMixin {
 
     @CInject(
             method = "removeRole(Lzombie/characters/Role;Lzombie/characters/Role;)V",
-            target = @CTarget("HEAD")
+            target = @CTarget("TAIL")
     )
     private void injectRemoveRoleData(Role role, Role newRoleInsteadExist) {
-        if (role == null) return;
+        if (role == null || role.getId() <= 0) return;
         ServerWorldDatabase db = (ServerWorldDatabase) (Object) this;
         try {
-            Field connField = ServerWorldDatabase.class.getDeclaredField("conn");
-            connField.setAccessible(true);
-            Connection conn = (Connection) connField.get(db);
-            DatabasePermissionsHelper.deleteCustomRoleData(conn, role.getId());
+            Connection conn = DatabasePermissionsHelper.getConnection();
+            if (conn == null) {
+                Field connField = ServerWorldDatabase.class.getDeclaredField("conn");
+                connField.setAccessible(true);
+                conn = (Connection) connField.get(db);
+            }
+            if (!roleExists(conn, role.getId())) {
+                DatabasePermissionsHelper.deleteCustomRoleData(conn, role.getId());
+            }
         } catch (Exception e) {
             DebugType.General.error("Failed to clean up extended role data: " + e.getMessage());
+        }
+    }
+
+    /**
+     * Checks whether a role row still exists after the vanilla removal path.
+     *
+     * @param conn   active database connection
+     * @param roleId role primary key
+     * @return {@code true} if the role still exists
+     * @throws SQLException if the lookup fails
+     */
+    private static boolean roleExists(Connection conn, int roleId) throws SQLException {
+        try (PreparedStatement stat = conn.prepareStatement("SELECT 1 FROM role WHERE id = ?")) {
+            stat.setInt(1, roleId);
+            try (ResultSet rs = stat.executeQuery()) {
+                return rs.next();
+            }
         }
     }
 
@@ -89,9 +126,13 @@ public class ServerWorldDatabaseMixin {
         try {
             Field connField = ServerWorldDatabase.class.getDeclaredField("conn");
             connField.setAccessible(true);
-            Connection conn = (Connection) connField.get(db);
+            Connection gameConnection = (Connection) connField.get(db);
+            Connection conn = DatabasePermissionsHelper.getConnection();
+            if (conn == null) {
+                conn = gameConnection;
+            }
 
-            DatabasePermissionsHelper.initDatabaseSchema(conn);
+            DatabasePermissionsHelper.initDatabaseSchema(gameConnection);
 
             for (int i = 0; i < roles.size(); i++) {
                 Role standardRole = roles.get(i);
@@ -126,7 +167,7 @@ public class ServerWorldDatabaseMixin {
 
     private static void syncRolesStaticField(String roleName, ExtendedRole newRole) {
         if (roleName == null) return;
-        switch (roleName.toLowerCase()) {
+        switch (roleName.toLowerCase(Locale.ROOT)) {
             case "admin" -> updateField("defaultForAdmin", newRole);
             case "user" -> {
                 updateField("defaultForUser", newRole);

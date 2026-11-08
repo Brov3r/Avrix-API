@@ -28,11 +28,22 @@ final class DirectoryLuaScriptSource implements LuaScriptSource {
         this.root = Objects.requireNonNull(root, "root").toAbsolutePath().normalize();
     }
 
+    /**
+     * Returns a stable identifier for this directory source.
+     *
+     * @return source identifier
+     */
     @Override
     public String id() {
         return "dir:" + root;
     }
 
+    /**
+     * Checks whether the directory contains the given relative Lua path.
+     *
+     * @param relativePath relative Lua path
+     * @return {@code true} if the file exists
+     */
     @Override
     public boolean contains(String relativePath) {
         try {
@@ -42,11 +53,25 @@ final class DirectoryLuaScriptSource implements LuaScriptSource {
         }
     }
 
+    /**
+     * Opens the given relative Lua path.
+     *
+     * @param relativePath relative Lua path
+     * @return file stream
+     * @throws IOException if the file cannot be opened
+     */
     @Override
     public InputStream open(String relativePath) throws IOException {
         return Files.newInputStream(resolve(relativePath));
     }
 
+    /**
+     * Lists Lua files under the given relative directory.
+     *
+     * @param directory relative directory or an empty string for the root
+     * @return relative Lua paths
+     * @throws IOException if the directory cannot be read
+     */
     @Override
     public List<String> list(String directory) throws IOException {
         Path start = directory == null || directory.isBlank() ? root : resolve(directory);
@@ -63,6 +88,9 @@ final class DirectoryLuaScriptSource implements LuaScriptSource {
         return files;
     }
 
+    /**
+     * Releases the source. Directory sources do not hold any resources.
+     */
     @Override
     public void close() {
         // Directory sources do not hold any resources.
@@ -79,6 +107,11 @@ final class DirectoryLuaScriptSource implements LuaScriptSource {
         return resolved;
     }
 
+    /**
+     * Returns a diagnostic representation of this source.
+     *
+     * @return source description
+     */
     @Override
     public String toString() {
         return id();

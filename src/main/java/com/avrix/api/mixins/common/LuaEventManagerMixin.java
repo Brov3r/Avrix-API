@@ -20,6 +20,13 @@ import zombie.Lua.LuaEventManager;
 public class LuaEventManagerMixin {
 
     /**
+     * Prevents instantiation of the transformer class.
+     */
+    private LuaEventManagerMixin() {
+        throw new UnsupportedOperationException("Mixin classes cannot be instantiated");
+    }
+
+    /**
      * Injects {@code EventManager.invoke(event)} into {@code triggerEvent(String)} and starts
      * the late custom Lua load phase for {@code OnGameBoot}.
      * <p>

@@ -13,6 +13,9 @@ import java.util.concurrent.CopyOnWriteArraySet;
  * Extended role domain entity that enriches Project Zomboid's native {@link Role} subsystem
  * with hierarchical wildcard permissions, role inheritance trees, chat formatting metadata
  * (prefixes/suffixes), and arbitrary metadata key-value pairs.
+ * <p>
+ * Parent roles contribute custom permissions and metadata. Native capabilities are not inherited
+ * and must be declared explicitly on each role. Negations always take precedence over grants.
  */
 public class ExtendedRole extends Role {
 
@@ -134,7 +137,8 @@ public class ExtendedRole extends Role {
 
     /**
      * Evaluates whether this role holds the specified native Project Zomboid capability.
-     * Guaranteed to return {@code true} for {@link Capability#LoginOnServer} on all non-banned roles.
+     * Guaranteed to return {@code true} for {@link Capability#LoginOnServer} on all roles whose
+     * name is not exactly {@code banned}.
      *
      * @param capability the capability to verify
      * @return {@code true} if held, {@code false} otherwise
@@ -179,7 +183,9 @@ public class ExtendedRole extends Role {
 
     /**
      * Evaluates whether this role possesses the target permission node,
-     * checking direct grants, wildcard patterns, and the inherited parent role hierarchy.
+     * checking direct grants, explicit negations, wildcard patterns, and the inherited parent role hierarchy.
+     * <p>
+     * Negations always take precedence over positive grants, including grants inherited from parent roles.
      *
      * @param permissionNode the target permission node to verify
      * @return {@code true} if authorized directly or through inheritance, {@code false} otherwise
@@ -188,7 +194,7 @@ public class ExtendedRole extends Role {
         if (permissionNode == null || permissionNode.isBlank()) {
             return false;
         }
-        return hasPermissionInternal(normalize(permissionNode), new HashSet<>());
+        return evaluatePermission(normalize(permissionNode), new HashSet<>()).isAllowed();
     }
 
     /**
@@ -196,32 +202,61 @@ public class ExtendedRole extends Role {
      *
      * @param normalizedTarget the lowercase normalized target node
      * @param visitedRoles     set of visited role names to prevent circular inheritance loops
-     * @return {@code true} if matched, {@code false} otherwise
+     * @return aggregated allow/deny decision
      */
-    private boolean hasPermissionInternal(String normalizedTarget, Set<String> visitedRoles) {
+    private PermissionDecision evaluatePermission(String normalizedTarget, Set<String> visitedRoles) {
         if (!visitedRoles.add(this.getName().toLowerCase(Locale.ROOT))) {
-            return false;
+            return PermissionDecision.UNSET;
         }
 
-        if (hasLocalPermission(normalizedTarget)) {
-            return true;
-        }
-
+        PermissionDecision decision = evaluateLocalPermission(normalizedTarget);
         for (String parentName : this.parents) {
-            Role parentRole = Roles.getRole(parentName);
-            if (parentRole instanceof ExtendedRole parentExtended) {
-                if (parentExtended.hasPermissionInternal(normalizedTarget, visitedRoles)) {
-                    return true;
-                }
+            ExtendedRole parentRole = resolveParentRole(parentName);
+            if (parentRole != null) {
+                decision = decision.merge(parentRole.evaluatePermission(normalizedTarget, visitedRoles));
             }
         }
+        return decision;
+    }
 
-        return false;
+    /**
+     * Evaluates only the permission patterns directly assigned to this role.
+     *
+     * @param normalizedTarget the lowercase normalized target node
+     * @return local allow/deny decision
+     */
+    private PermissionDecision evaluateLocalPermission(String normalizedTarget) {
+        boolean allowed = false;
+        boolean denied = false;
+        for (String granted : this.customPermissions) {
+            if (granted.startsWith("-")) {
+                String positivePattern = granted.substring(1);
+                if (!positivePattern.isEmpty() && matchesPermission(positivePattern, normalizedTarget)) {
+                    denied = true;
+                }
+            } else if (matchesPermission(granted, normalizedTarget)) {
+                allowed = true;
+            }
+        }
+        return new PermissionDecision(allowed, denied);
+    }
+
+    /**
+     * Checks whether this role or any of its parents explicitly denies the requested permission.
+     *
+     * @param permissionNode the permission node to evaluate
+     * @return {@code true} if an explicit negation matches
+     */
+    public boolean deniesPermission(String permissionNode) {
+        if (permissionNode == null || permissionNode.isBlank()) {
+            return false;
+        }
+        return evaluatePermission(normalize(permissionNode), new HashSet<>()).denied();
     }
 
     /**
      * Checks if this specific role directly holds the specified permission node,
-     * ignoring any inherited parent roles.
+     * ignoring any inherited parent roles. A local explicit negation overrides local grants.
      *
      * @param permissionNode the permission node to evaluate
      * @return {@code true} if held directly via exact match or local wildcard
@@ -230,24 +265,16 @@ public class ExtendedRole extends Role {
         if (permissionNode == null || permissionNode.isBlank()) {
             return false;
         }
-
-        String target = normalize(permissionNode);
-        for (String granted : this.customPermissions) {
-            if (matchesPermission(granted, target)) {
-                return true;
-            }
-        }
-
-        return false;
+        return evaluateLocalPermission(normalize(permissionNode)).isAllowed();
     }
 
     /**
-     * Retrieves an unmodifiable snapshot view of all custom permissions directly granted to this role.
+     * Retrieves an immutable snapshot of all custom permissions directly assigned to this role.
      *
-     * @return an unmodifiable set of normalized permission strings
+     * @return immutable set of normalized permission strings
      */
     public Set<String> getPermissions() {
-        return Collections.unmodifiableSet(this.customPermissions);
+        return Set.copyOf(this.customPermissions);
     }
 
     /**
@@ -272,6 +299,11 @@ public class ExtendedRole extends Role {
         if (cleanParent.equalsIgnoreCase(this.getName())) {
             return false;
         }
+        for (String existing : this.parents) {
+            if (existing.equalsIgnoreCase(cleanParent)) {
+                return false;
+            }
+        }
 
         return this.parents.add(cleanParent);
     }
@@ -286,16 +318,17 @@ public class ExtendedRole extends Role {
         if (parentRoleName == null || parentRoleName.isBlank()) {
             return false;
         }
-        return this.parents.remove(parentRoleName.strip());
+        String cleanParent = parentRoleName.strip();
+        return this.parents.removeIf(parent -> parent.equalsIgnoreCase(cleanParent));
     }
 
     /**
-     * Retrieves an unmodifiable snapshot view of all parent role names directly inherited by this role.
+     * Retrieves an immutable snapshot of all parent role names directly inherited by this role.
      *
-     * @return an unmodifiable set of parent role names
+     * @return immutable set of parent role names
      */
     public Set<String> getParents() {
-        return Collections.unmodifiableSet(this.parents);
+        return Set.copyOf(this.parents);
     }
 
     /**
@@ -364,16 +397,28 @@ public class ExtendedRole extends Role {
      * @return the resolved string value, or {@code null} if not found
      */
     public String getMeta(String key) {
+        return getMeta(key, new HashSet<>());
+    }
+
+    /**
+     * Resolves metadata with cycle protection and case-insensitive parent lookup.
+     *
+     * @param key          metadata key
+     * @param visitedRoles role names already visited
+     * @return resolved value or {@code null}
+     */
+    private String getMeta(String key, Set<String> visitedRoles) {
         if (key == null || key.isBlank()) return null;
+        if (!visitedRoles.add(this.getName().toLowerCase(Locale.ROOT))) return null;
 
         String normalizedKey = key.strip().toLowerCase(Locale.ROOT);
         String local = this.metadata.get(normalizedKey);
         if (local != null) return local;
 
         for (String parentName : this.parents) {
-            Role parent = Roles.getRole(parentName);
-            if (parent instanceof ExtendedRole parentExtended) {
-                String inherited = parentExtended.getMeta(key);
+            ExtendedRole parentExtended = resolveParentRole(parentName);
+            if (parentExtended != null) {
+                String inherited = parentExtended.getMeta(key, visitedRoles);
                 if (inherited != null) return inherited;
             }
         }
@@ -382,12 +427,19 @@ public class ExtendedRole extends Role {
     }
 
     /**
-     * Retrieves an unmodifiable snapshot view of all direct metadata key-value pairs.
+     * Removes all direct metadata entries from this role.
+     */
+    public void clearMetadata() {
+        this.metadata.clear();
+    }
+
+    /**
+     * Retrieves an immutable snapshot of all direct metadata key-value pairs.
      *
-     * @return unmodifiable map of metadata
+     * @return immutable map of metadata
      */
     public Map<String, String> getMetadata() {
-        return Collections.unmodifiableMap(this.metadata);
+        return Map.copyOf(this.metadata);
     }
 
     /**
@@ -398,6 +450,32 @@ public class ExtendedRole extends Role {
      */
     private static String normalize(String raw) {
         return raw.strip().toLowerCase(Locale.ROOT);
+    }
+
+    /**
+     * Resolves a parent role by name using case-insensitive matching.
+     *
+     * @param parentName parent role name
+     * @return matching extended role or {@code null}
+     */
+    private static ExtendedRole resolveParentRole(String parentName) {
+        if (parentName == null || parentName.isBlank()) {
+            return null;
+        }
+
+        List<Role> roles = Roles.getRoles();
+        if (roles != null) {
+            for (Role role : roles) {
+                if (role instanceof ExtendedRole extended
+                        && role.getName() != null
+                        && role.getName().equalsIgnoreCase(parentName.strip())) {
+                    return extended;
+                }
+            }
+        }
+
+        Role exact = Roles.getRole(parentName);
+        return exact instanceof ExtendedRole extended ? extended : null;
     }
 
     /**
@@ -420,5 +498,38 @@ public class ExtendedRole extends Role {
             return !prefix.isEmpty() && (requested.equals(prefix) || requested.startsWith(prefix + "."));
         }
         return false;
+    }
+
+    /**
+     * Aggregated permission decision with deny-overrides semantics.
+     *
+     * @param allowed whether at least one positive grant matched
+     * @param denied  whether at least one explicit negation matched
+     */
+    private record PermissionDecision(boolean allowed, boolean denied) {
+
+        /**
+         * Neutral decision used for cycle prevention and empty roles.
+         */
+        private static final PermissionDecision UNSET = new PermissionDecision(false, false);
+
+        /**
+         * Merges another decision into this one.
+         *
+         * @param other decision to merge
+         * @return merged decision
+         */
+        private PermissionDecision merge(PermissionDecision other) {
+            return new PermissionDecision(allowed || other.allowed, denied || other.denied);
+        }
+
+        /**
+         * Returns whether the aggregated result grants access.
+         *
+         * @return {@code true} only when allowed and not denied
+         */
+        private boolean isAllowed() {
+            return allowed && !denied;
+        }
     }
 }

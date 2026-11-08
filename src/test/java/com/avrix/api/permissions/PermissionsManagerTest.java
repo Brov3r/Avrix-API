@@ -61,11 +61,30 @@ class PermissionsManagerTest {
     }
 
     private static void clearManagerCache() throws Exception {
-        Field permsField = PermissionsManager.class.getDeclaredField("CUSTOM_PLAYER_PERMISSIONS");
-        permsField.setAccessible(true);
+        for (String fieldName : List.of(
+                "CUSTOM_PLAYER_PERMISSIONS",
+                "YAML_PLAYER_PERMISSIONS",
+                "CONFIGURED_USER_GROUPS",
+                "CONFIGURED_USER_PREFIXES",
+                "CONFIGURED_USER_SUFFIXES",
+                "TEMPORARY_USER_ROLES"
+        )) {
+            Field field = PermissionsManager.class.getDeclaredField(fieldName);
+            field.setAccessible(true);
+            @SuppressWarnings("unchecked")
+            Map<?, ?> map = (Map<?, ?>) field.get(null);
+            map.clear();
+        }
+
+        Field rolesField = PermissionsManager.class.getDeclaredField("YAML_CREATED_ROLES");
+        rolesField.setAccessible(true);
         @SuppressWarnings("unchecked")
-        Map<?, ?> permsMap = (Map<?, ?>) permsField.get(null);
-        permsMap.clear();
+        Set<?> createdRoles = (Set<?>) rolesField.get(null);
+        createdRoles.clear();
+
+        Field startupField = PermissionsManager.class.getDeclaredField("STARTUP_CONFIG_LOADED");
+        startupField.setAccessible(true);
+        ((AtomicBoolean) startupField.get(null)).set(false);
     }
 
     // =========================================================================
@@ -601,15 +620,26 @@ class PermissionsManagerTest {
         @Test
         @DisplayName("Should persist temporary role across server restart and revert if expired during offline")
         void shouldPersistAndRevertTemporaryRoleAcrossRestart() throws Exception {
+            String previousWorld = Core.gameSaveWorld;
+            Core.gameSaveWorld = "permissions-test-world";
             try (java.sql.Connection conn = java.sql.DriverManager.getConnection("jdbc:sqlite::memory:")) {
-                // Create required SQLite schema stubs
+                // Create the production whitelist/role schema used by Project Zomboid.
                 try (java.sql.Statement stat = conn.createStatement()) {
                     stat.executeUpdate("""
-                            CREATE TABLE IF NOT EXISTS users (
-                                username TEXT PRIMARY KEY,
-                                role TEXT
+                            CREATE TABLE IF NOT EXISTS role (
+                                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                                name TEXT NOT NULL
                             )
                             """);
+                    stat.executeUpdate("""
+                            CREATE TABLE IF NOT EXISTS whitelist (
+                                username TEXT,
+                                steamid TEXT,
+                                world TEXT,
+                                role INTEGER
+                            )
+                            """);
+                    stat.executeUpdate("INSERT INTO role (id, name) VALUES (1, 'RestartVip'), (2, 'user')");
                 }
                 DatabasePermissionsHelper.initDatabaseSchema(conn);
 
@@ -617,30 +647,42 @@ class PermissionsManagerTest {
                 String username = "OfflineVipUser";
 
                 Instant shortExp = Instant.now().plus(100, ChronoUnit.MILLIS);
-                try (java.sql.PreparedStatement stat = conn.prepareStatement("INSERT INTO users (username, role) VALUES (?, ?)")) {
+                try (java.sql.PreparedStatement stat = conn.prepareStatement(
+                        "INSERT INTO whitelist (username, world, role) VALUES (?, ?, ?)")) {
                     stat.setString(1, username);
-                    stat.setString(2, "RestartVip");
+                    stat.setString(2, Core.gameSaveWorld);
+                    stat.setInt(3, vipRole.getId());
                     stat.executeUpdate();
                 }
                 DatabasePermissionsHelper.saveTemporaryRole(conn, username, "RestartVip", shortExp, "user");
 
                 Map<String, TemporaryRoleEntry> tempRolesMap = new java.util.concurrent.ConcurrentHashMap<>();
                 DatabasePermissionsHelper.loadAllTemporaryRoles(conn, tempRolesMap);
-                assertThat(tempRolesMap).containsKey(username);
-                assertThat(tempRolesMap.get(username).roleName()).isEqualTo("RestartVip");
+                String normalizedUsername = PermissionsManager.normalizeIdentifier(username);
+                assertThat(tempRolesMap).containsKey(normalizedUsername);
+                assertThat(tempRolesMap.get(normalizedUsername).roleName()).isEqualTo("RestartVip");
 
                 Thread.sleep(150);
 
                 tempRolesMap.clear();
                 DatabasePermissionsHelper.loadAllTemporaryRoles(conn, tempRolesMap);
 
-                assertThat(tempRolesMap).doesNotContainKey(username);
+                assertThat(tempRolesMap).doesNotContainKey(normalizedUsername);
 
-                try (java.sql.Statement stat = conn.createStatement();
-                     java.sql.ResultSet rs = stat.executeQuery("SELECT role FROM users WHERE username = '" + username + "'")) {
-                    assertThat(rs.next()).isTrue();
-                    assertThat(rs.getString("role")).isEqualTo("user");
+                try (java.sql.PreparedStatement stat = conn.prepareStatement("""
+                        SELECT r.name FROM whitelist w
+                        JOIN role r ON r.id = w.role
+                        WHERE w.username = ? AND w.world = ?
+                        """)) {
+                    stat.setString(1, username);
+                    stat.setString(2, Core.gameSaveWorld);
+                    try (java.sql.ResultSet rs = stat.executeQuery()) {
+                        assertThat(rs.next()).isTrue();
+                        assertThat(rs.getString("name")).isEqualTo("user");
+                    }
                 }
+            } finally {
+                Core.gameSaveWorld = previousWorld;
             }
         }
 
@@ -1231,6 +1273,244 @@ class PermissionsManagerTest {
             assertThat(PermissionsManager.hasPermission((Role) null, "SeePlayersConnected")).isFalse();
         }
     }
+    // =========================================================================
+    // 12. Security and Reconciliation Regressions
+    // =========================================================================
+
+    @Nested
+    @DisplayName("12. Security and Declarative Reconciliation Regressions")
+    class SecurityAndReconciliationTests {
+
+        @Test
+        @DisplayName("Role negation should override local wildcards and inherited grants")
+        void roleNegationShouldOverrideWildcardsAndParents() {
+            ExtendedRole parent = new ExtendedRole("NegationParent");
+            parent.addPermission("*");
+
+            ExtendedRole child = new ExtendedRole("NegationChild");
+            child.addParent("negationparent");
+            child.addPermission("-dangerous.*");
+
+            Roles.getRoles().addAll(List.of(parent, child));
+
+            assertThat(child.hasPermission("safe.command")).isTrue();
+            assertThat(child.hasPermission("dangerous.reboot")).isFalse();
+            assertThat(child.hasPermission("dangerous")).isFalse();
+
+            ExtendedRole local = new ExtendedRole("LocalNegation");
+            local.addPermission("*");
+            local.addPermission("-secret.node");
+            Roles.getRoles().add(local);
+
+            assertThat(local.hasPermission("public.node")).isTrue();
+            assertThat(local.hasPermission("secret.node")).isFalse();
+        }
+
+        @Test
+        @DisplayName("Metadata lookup should survive parent cycles and ignore parent name case")
+        void metadataLookupShouldBeCycleSafeAndCaseInsensitive() {
+            ExtendedRole first = new ExtendedRole("MetaCycleA");
+            ExtendedRole second = new ExtendedRole("MetaCycleB");
+            first.addParent("metacycleb");
+            second.addParent("metacyclea");
+            Roles.getRoles().addAll(List.of(first, second));
+
+            assertThat(first.getMeta("missing")).isNull();
+
+            ExtendedRole parent = new ExtendedRole("MetaParent");
+            parent.setMeta("maxHomes", "5");
+            ExtendedRole child = new ExtendedRole("MetaChild");
+            child.addParent("metaparent");
+            Roles.getRoles().addAll(List.of(parent, child));
+
+            assertThat(child.getMeta("maxHomes")).isEqualTo("5");
+        }
+
+        @Test
+        @DisplayName("Banned role must not receive LoginOnServer from YAML")
+        void bannedRoleShouldNotReceiveLoginCapability() throws IOException {
+            Path configPath = tempFolder.resolve("banned-permissions.yml");
+            Files.writeString(configPath, """
+                    groups:
+                      banned:
+                        description: "Banned"
+                        capabilities:
+                          - "LoginOnServer"
+                    users: {}
+                    """);
+
+            assertThat(PermissionsManager.loadPermissionsConfig(configPath)).isTrue();
+            Role banned = Roles.getRole("banned");
+            assertThat(banned).isInstanceOf(ExtendedRole.class);
+            assertThat(((ExtendedRole) banned).getCapabilities()).doesNotContain(Capability.LoginOnServer);
+            assertThat(banned.hasCapability(Capability.LoginOnServer)).isFalse();
+        }
+
+        @Test
+        @DisplayName("Zero or null durations must not grant permanent access")
+        void invalidDurationsShouldBeRejected() {
+            assertThat(PermissionsManager.assignTemporaryRole(
+                    "ZeroDurationUser", "user", 0, TimeUnit.SECONDS, "user")).isFalse();
+            assertThat(PermissionsManager.grantPermissionToPlayer(
+                    "ZeroDurationUser", "zero.duration", 0, TimeUnit.SECONDS)).isFalse();
+            assertThat(PermissionsManager.grantPermissionToPlayer(
+                    "ZeroDurationUser", "zero.duration", -1, TimeUnit.SECONDS)).isFalse();
+        }
+
+        @Test
+        @DisplayName("Identifiers should be matched case-insensitively")
+        void identifiersShouldBeCaseInsensitive() {
+            PermissionsManager.grantPermissionToPlayer("CaseSensitiveUser", "case.node");
+            IsoPlayer player = createMockPlayer("casesensitiveuser", 0L, null);
+
+            assertThat(PermissionsManager.hasPermission(player, "case.node")).isTrue();
+            assertThat(PermissionsManager.getPlayerPermissions("CASESENSITIVEUSER")).contains("case.node");
+        }
+
+        @Test
+        @DisplayName("SteamID negation should override username positive grants")
+        void steamDenyShouldOverrideUsernameAllow() {
+            long steamId = 76561198000000001L;
+            PermissionsManager.grantPermissionToPlayer("IdentityUser", "sensitive.node");
+            PermissionsManager.grantPermissionToPlayer(String.valueOf(steamId), "-sensitive.node");
+
+            IsoPlayer player = createMockPlayer("IdentityUser", steamId, null);
+            assertThat(PermissionsManager.hasPermission(player, "sensitive.node")).isFalse();
+        }
+
+        @Test
+        @DisplayName("Reloading YAML should revoke permissions removed from the users block")
+        void yamlReloadShouldRevokeRemovedUserPermissions() throws IOException {
+            Path configPath = tempFolder.resolve("reload-users.yml");
+            Files.writeString(configPath, """
+                    users:
+                      "YamlUser":
+                        permissions:
+                          - "yaml.direct"
+                    """);
+            assertThat(PermissionsManager.loadPermissionsConfig(configPath)).isTrue();
+
+            IsoPlayer player = createMockPlayer("YamlUser", 0L, null);
+            assertThat(PermissionsManager.hasPermission(player, "yaml.direct")).isTrue();
+
+            Files.writeString(configPath, "users: {}\n");
+            assertThat(PermissionsManager.loadPermissionsConfig(configPath)).isTrue();
+
+            assertThat(PermissionsManager.hasPermission(player, "yaml.direct")).isFalse();
+            assertThat(PermissionsManager.getPlayerPermissions("YamlUser")).isEmpty();
+        }
+
+        @Test
+        @DisplayName("Reloading YAML should delete roles that were created by the previous YAML version")
+        void yamlReloadShouldDeleteRemovedRoles() throws IOException {
+            Path configPath = tempFolder.resolve("reload-roles.yml");
+            Files.writeString(configPath, """
+                    groups:
+                      yaml_created_role:
+                        description: "Temporary"
+                        permissions:
+                          - "yaml.role.node"
+                    users: {}
+                    """);
+            assertThat(PermissionsManager.loadPermissionsConfig(configPath)).isTrue();
+            assertThat(Roles.getRole("yaml_created_role")).isNotNull();
+
+            Files.writeString(configPath, "groups: {}\nusers: {}\n");
+            assertThat(PermissionsManager.loadPermissionsConfig(configPath)).isTrue();
+
+            assertThat(Roles.getRole("yaml_created_role")).isNull();
+        }
+
+        @Test
+        @DisplayName("Reloading YAML should clear metadata removed from a role")
+        void yamlReloadShouldClearRemovedMetadata() throws IOException {
+            Path configPath = tempFolder.resolve("reload-metadata.yml");
+            Files.writeString(configPath, """
+                    groups:
+                      metadata_role:
+                        description: "Metadata"
+                        metadata:
+                          prefix_key: "value"
+                    users: {}
+                    """);
+            assertThat(PermissionsManager.loadPermissionsConfig(configPath)).isTrue();
+            ExtendedRole role = (ExtendedRole) Roles.getRole("metadata_role");
+            assertThat(role.getMeta("prefix_key")).isEqualTo("value");
+
+            Files.writeString(configPath, """
+                    groups:
+                      metadata_role:
+                        description: "Metadata"
+                    users: {}
+                    """);
+            assertThat(PermissionsManager.loadPermissionsConfig(configPath)).isTrue();
+
+            assertThat(((ExtendedRole) Roles.getRole("metadata_role")).getMeta("prefix_key")).isNull();
+        }
+
+        @Test
+        @DisplayName("Clearing all persistent player permissions should remove every row")
+        void clearingPersistentPlayerPermissionsShouldRemoveRows() throws Exception {
+            try (java.sql.Connection conn = java.sql.DriverManager.getConnection("jdbc:sqlite::memory:")) {
+                try (java.sql.Statement stat = conn.createStatement()) {
+                    stat.executeUpdate("CREATE TABLE role (id INTEGER PRIMARY KEY, name TEXT)");
+                }
+                DatabasePermissionsHelper.initDatabaseSchema(conn);
+                DatabasePermissionsHelper.savePlayerPermission(conn, "ClearUser", "node.one", null);
+                DatabasePermissionsHelper.savePlayerPermission(conn, "ClearUser", "node.two", null);
+
+                assertThat(DatabasePermissionsHelper.deleteAllPlayerPermissions(conn, "ClearUser")).isTrue();
+
+                try (java.sql.Statement stat = conn.createStatement();
+                     java.sql.ResultSet rs = stat.executeQuery(
+                             "SELECT count(*) FROM player_permissions WHERE identifier = 'clearuser'")) {
+                    assertThat(rs.next()).isTrue();
+                    assertThat(rs.getInt(1)).isZero();
+                }
+            }
+        }
+
+        @Test
+        @DisplayName("YAML personal prefixes and suffixes should override role styling")
+        void yamlPersonalStylesShouldOverrideRoleStyling() throws IOException {
+            Path configPath = tempFolder.resolve("styles.yml");
+            Files.writeString(configPath, """
+                    groups:
+                      styled:
+                        description: "Styled"
+                        prefix: "[Role] "
+                        suffix: " [Role]"
+                    users:
+                      "StyledUser":
+                        group: "styled"
+                        prefix: "[Personal] "
+                        suffix: " [Personal]"
+                    """);
+            assertThat(PermissionsManager.loadPermissionsConfig(configPath)).isTrue();
+
+            ExtendedRole role = (ExtendedRole) Roles.getRole("styled");
+            IsoPlayer player = createMockPlayer("StyledUser", 0L, role);
+
+            assertThat(PermissionsManager.getChatPrefix(player, "")).isEqualTo("[Personal] ");
+            assertThat(PermissionsManager.getChatSuffix(player, "")).isEqualTo(" [Personal]");
+        }
+
+        @Test
+        @DisplayName("Connection permission checks should include direct player permissions")
+        void connectionPermissionShouldIncludeDirectPermissions() {
+            ExtendedRole role = PermissionsManager.createRole(
+                    "ConnectionRole", "Connection role", Color.white, List.of());
+            IsoPlayer player = createMockPlayer("ConnectionUser", 0L, role);
+            UdpConnection connection = Mockito.mock(UdpConnection.class);
+            connection.players = new IsoPlayer[]{player};
+            when(connection.getUserName()).thenReturn("ConnectionUser");
+
+            PermissionsManager.grantPermissionToPlayer("ConnectionUser", "connection.direct");
+
+            assertThat(PermissionsManager.hasPermission(connection, "connection.direct")).isTrue();
+        }
+    }
+
     // =========================================================================
     // Mock Helpers
     // =========================================================================

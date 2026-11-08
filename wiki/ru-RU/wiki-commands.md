@@ -225,7 +225,7 @@ public class KitCommand implements Command {
 ### Права и cooldown
 
 1. **Консоль и RCON** обходят проверку прав и cooldown.
-2. **OR-логика** внутри `permission` и `capability`.
+2. **OR-логика** внутри `permission`, внутри `capability` и между этими группами.
 3. **AND-логика** между родительской командой и выбранным subcommand'ом.
 4. Cooldown'ы учитываются по identity источника и пути команды/subcommand'а.
 5. Проверка cooldown атомарна, просроченные записи периодически очищаются.

@@ -703,8 +703,19 @@ public final class LuaScriptLoader {
      * Requested script load operation.
      */
     private enum RequestType {
+        /**
+         * A single module load.
+         */
         SINGLE,
+
+        /**
+         * A selected list of module loads.
+         */
         MULTIPLE,
+
+        /**
+         * A recursive group load.
+         */
         GROUP
     }
 

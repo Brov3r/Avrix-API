@@ -113,6 +113,9 @@ users:
       "avrix.boost.experience": "2026-12-31T23:59:59Z"
 ```
 
+> The `users` block above is illustrative. The auto-generated file contains an empty `users: {}` so a fresh
+> installation never grants elevated access to a real player.
+
 ---
 
 ### Programmatic Role Creation and Modification (`ExtendedRole`)
@@ -173,21 +176,15 @@ public class ExamplePlugin implements Plugin {
 ### Assigning Roles to Players and Connections
 
 ```java
-// 1. To an online player entity (synchronizes entity, network, and database)
+// 1. To an online player entity (uses the vanilla role-change pipeline when available)
 PermissionsManager.assignRole(player, "admin");
 
 // 2. To a network connection (UdpConnection)
-PermissionsManager.
-
-assignRole(connection, "moderator");
+PermissionsManager.assignRole(connection, "moderator");
 
 // 3. By Username or SteamID64 (for online players and database updates)
-PermissionsManager.
-
-assignRole("Brov3r","admin");
-PermissionsManager.
-
-assignRole("76561198012345678","vip");
+PermissionsManager.assignRole("Brov3r", "admin");
+PermissionsManager.assignRole("76561198012345678", "vip");
 ```
 
 ---
@@ -222,27 +219,19 @@ flowchart TD
 
 ```java
 // Check on an IsoPlayer
-if(PermissionsManager.hasPermission(player, "avrix.commands.heal")){
-        player.
-
-getBodyDamage().
-
-RestoreToFullHealth();
+if (PermissionsManager.hasPermission(player, "avrix.commands.heal")) {
+    player.getBodyDamage().RestoreToFullHealth();
 }
 
 // Check on an active UdpConnection
-        if(PermissionsManager.
-
-hasPermission(connection, "avrix.admin.panel")){
-        // Send UI network packet
-        }
+if (PermissionsManager.hasPermission(connection, "avrix.admin.panel")) {
+    // Send UI network packet
+}
 
 // Check on a Role object
-        if(PermissionsManager.
-
-hasPermission(role, "avrix.chat.color")){
-        // Allow chat formatting
-        }
+if (PermissionsManager.hasPermission(role, "avrix.chat.color")) {
+    // Allow chat formatting
+}
 ```
 
 ---
@@ -270,36 +259,27 @@ import java.util.Collection;
 import java.util.concurrent.TimeUnit;
 
 // Permanent personal permission (by Username or SteamID64)
-PermissionsManager.grantPermissionToPlayer("Brov3r","avrix.special.access");
+PermissionsManager.grantPermissionToPlayer("Brov3r", "avrix.special.access");
 
 // Temporary permission for 7 days
-PermissionsManager.
-
-grantPermissionToPlayer("Brov3r","avrix.vip.boost",7,TimeUnit.DAYS);
+PermissionsManager.grantPermissionToPlayer("Brov3r", "avrix.vip.boost", 7, TimeUnit.DAYS);
 
 // Temporary permission until an exact ISO-8601 timestamp
-PermissionsManager.
-
-grantPermissionToPlayer("76561198012345678","avrix.event.2026",Instant.parse("2026-12-31T23:59:59Z"));
+PermissionsManager.grantPermissionToPlayer(
+        "76561198012345678", "avrix.event.2026", Instant.parse("2026-12-31T23:59:59Z"));
 
 // Revoke permission
-        PermissionsManager.
+PermissionsManager.revokePermissionFromPlayer("Brov3r", "avrix.special.access");
 
-revokePermissionFromPlayer("Brov3r","avrix.special.access");
+// Clear every direct permission for a player (also removes persistent rows)
+PermissionsManager.clearPlayerPermissions("Brov3r");
 
 // Retrieve active entries with expiration validation
 Collection<PlayerPermission> entries = PermissionsManager.getPlayerPermissionEntries("Brov3r");
-for(
-PlayerPermission entry :entries){
-        System.out.
-
-printf("Node: %s, Expired: %s, Expiration: %s%n",
-       entry.node(),entry.
-
-isExpired(),entry.
-
-expirationDate());
-        }
+for (PlayerPermission entry : entries) {
+    System.out.printf("Node: %s, Expired: %s, Expiration: %s%n",
+            entry.node(), entry.isExpired(), entry.expiration());
+}
 ```
 
 ---
@@ -328,3 +308,21 @@ The subsystem publishes the following events via `EventManager`:
 | `ServerEvents.PLAYER_ROLE_ASSIGNED` | `IsoPlayer player, Role oldRole, Role newRole`    | Triggered when a player's role changes                        |
 | `ServerEvents.PERMISSION_GRANTED`   | `String identifier, String node, Instant expires` | Triggered when a permanent or temporary permission is granted |
 | `ServerEvents.PERMISSION_REVOKED`   | `String identifier, String node`                  | Triggered when a permission is revoked                        |
+
+---
+
+### Implementation Notes
+
+- Role negations (`-node`, `-branch.*`) use deny-overrides across the role and all parent roles.
+- Identifiers are matched case-insensitively and stored lowercase; SteamID64 keys remain numeric strings.
+- `duration <= 0` or a `null` time unit is rejected and never becomes a permanent grant.
+- The generated `permissions.yml` contains no active users or grants.
+- Temporary roles are persisted and restored after restart; expired entries are reverted through the `whitelist` table.
+- `clearPlayerPermissions` removes persistent rows and publishes `PERMISSION_REVOKED` for every removed node.
+- YAML reload reconciles removals for YAML-created roles, direct permissions, metadata, and user style overrides.
+- Parent roles inherit custom permissions and metadata, but not native capabilities.
+- Personal `prefix`/`suffix` overrides are exposed through `getChatPrefix` and `getChatSuffix`.
+- `loadPermissionsConfig` returns `boolean`; a failed reload keeps the previous runtime state.
+- Permission tables use a dedicated SQLite connection with a busy timeout; expiry work is processed from the
+  dedicated-server main loop.
+- Expiry events are published on the server thread when the main-loop hook is active.

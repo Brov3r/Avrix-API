@@ -387,6 +387,41 @@ class CommandManagerTest {
         }
 
         @Test
+        @DisplayName("Should revoke command access immediately when a direct permission is removed")
+        void shouldRevokeCommandAccessImmediately() {
+            CommandManager.register(new TestPermissionCommand());
+
+            PermissionsManager.grantPermissionToPlayer("DynamicCommandUser", "avrix.commands.heal");
+            UdpConnection playerConnection = createMockPlayerConnection("DynamicCommandUser", null);
+
+            assertThat(CommandManager.handleCommand("/heal", playerConnection))
+                    .isEqualTo("Healed: DynamicCommandUser");
+
+            assertThat(PermissionsManager.revokePermissionFromPlayer(
+                    "DynamicCommandUser", "avrix.commands.heal")).isTrue();
+            assertThat(CommandManager.handleCommand("/heal", playerConnection))
+                    .isEqualTo(CommandMessages.noPermission());
+        }
+
+        @Test
+        @DisplayName("Should deny command access after a temporary permission expires")
+        void shouldDenyCommandAccessAfterTemporaryPermissionExpires() throws InterruptedException {
+            CommandManager.register(new TestPermissionCommand());
+
+            PermissionsManager.grantPermissionToPlayer(
+                    "TemporaryCommandUser", "avrix.commands.heal", 60, TimeUnit.MILLISECONDS);
+            UdpConnection playerConnection = createMockPlayerConnection("TemporaryCommandUser", null);
+
+            assertThat(CommandManager.handleCommand("/heal", playerConnection))
+                    .isEqualTo("Healed: TemporaryCommandUser");
+
+            Thread.sleep(100);
+
+            assertThat(CommandManager.handleCommand("/heal", playerConnection))
+                    .isEqualTo(CommandMessages.noPermission());
+        }
+
+        @Test
         @DisplayName("Should grant access via hierarchical wildcard node in ExtendedRole")
         void shouldAuthorizePlayerWithWildcard() {
             CommandManager.register(new TestPermissionCommand());

@@ -49,6 +49,11 @@ final class ClassExposure implements LuaExposure {
         this.type = type;
     }
 
+    /**
+     * Applies the class exposure to the given Lua environment.
+     *
+     * @param environment target Lua environment
+     */
     @Override
     public void apply(KahluaTable environment) {
         if (appliedIn == environment) {
@@ -81,6 +86,11 @@ final class ClassExposure implements LuaExposure {
         appliedIn = environment;
     }
 
+    /**
+     * Removes the class exposure from the given Lua environment.
+     *
+     * @param environment Lua environment to clean up
+     */
     @Override
     public void remove(KahluaTable environment) {
         if (appliedIn != environment) {
@@ -108,11 +118,20 @@ final class ClassExposure implements LuaExposure {
         invalidate();
     }
 
+    /**
+     * Checks whether this exposure is applied to the given environment.
+     *
+     * @param environment Lua environment to check
+     * @return {@code true} if applied
+     */
     @Override
     public boolean isAppliedIn(KahluaTable environment) {
         return appliedIn == environment;
     }
 
+    /**
+     * Clears environment-specific state after a Lua reset.
+     */
     @Override
     public void invalidate() {
         appliedIn = null;
@@ -123,6 +142,12 @@ final class ClassExposure implements LuaExposure {
         instanceMethods.clear();
     }
 
+    /**
+     * Checks whether this exposure affects the given Java type.
+     *
+     * @param candidate Java type
+     * @return {@code true} if the type is exposed by this entry
+     */
     @Override
     public boolean affects(Class<?> candidate) {
         return type == candidate;
@@ -304,6 +329,11 @@ final class ClassExposure implements LuaExposure {
         return new PackageTarget(parent, parts[parts.length - 1]);
     }
 
+    /**
+     * Returns a diagnostic representation of this exposure.
+     *
+     * @return exposure description
+     */
     @Override
     public String toString() {
         return "ClassExposure[" + type.getName() + "]";

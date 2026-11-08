@@ -13,6 +13,13 @@ import zombie.characters.Roles;
 public class RolesMixin {
 
     /**
+     * Prevents instantiation of the transformer class.
+     */
+    private RolesMixin() {
+        throw new UnsupportedOperationException("Mixin classes cannot be instantiated");
+    }
+
+    /**
      * Injected at the exit point ({@code TAIL}) of {@link Roles#init()}.
      */
     @CInject(
@@ -20,6 +27,6 @@ public class RolesMixin {
             target = @CTarget("TAIL")
     )
     private static void injectAfterRolesInit() {
-        PermissionsManager.loadPermissionsConfig();
+        PermissionsManager.loadStartupPermissionsConfig();
     }
 }

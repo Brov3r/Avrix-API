@@ -13,15 +13,54 @@ import java.util.Locale;
  */
 public final class CommandMessages {
 
+    /**
+     * Translation key for the player-only command scope message.
+     */
     public static final String SCOPE_CHAT = "Avrix_Command_ScopeChat";
+
+    /**
+     * Translation key for the server-console-only command scope message.
+     */
     public static final String SCOPE_CONSOLE = "Avrix_Command_ScopeConsole";
+
+    /**
+     * Translation key for the invalid command scope message.
+     */
     public static final String SCOPE_BOTH = "Avrix_Command_ScopeBoth";
+
+    /**
+     * Translation key for the root command permission-denied message.
+     */
     public static final String NO_PERMISSION = "Avrix_Command_NoPermission";
+
+    /**
+     * Translation key for the subcommand permission-denied message.
+     */
     public static final String NO_SUBCOMMAND_PERMISSION = "Avrix_Command_NoSubcommandPermission";
+
+    /**
+     * Translation key for the root command cooldown message.
+     */
     public static final String COMMAND_COOLDOWN = "Avrix_Command_Cooldown";
+
+    /**
+     * Translation key for the subcommand cooldown message.
+     */
     public static final String SUBCOMMAND_COOLDOWN = "Avrix_Command_SubcommandCooldown";
+
+    /**
+     * Translation key for the command success message.
+     */
     public static final String SUCCESS = "Avrix_Command_Success";
+
+    /**
+     * Translation key for the internal command error message.
+     */
     public static final String INTERNAL_ERROR = "Avrix_Command_InternalError";
+
+    /**
+     * Translation key for the invalid command syntax message.
+     */
     public static final String INVALID_SYNTAX = "Avrix_Command_InvalidSyntax";
 
     private CommandMessages() {

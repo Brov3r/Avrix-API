@@ -15,6 +15,14 @@ import zombie.network.IConnection;
  */
 @CTransformer(value = GameServer.class)
 public class GameServerPermissionsMixin {
+
+    /**
+     * Prevents instantiation of the transformer class.
+     */
+    private GameServerPermissionsMixin() {
+        throw new UnsupportedOperationException("Mixin classes cannot be instantiated");
+    }
+
     /**
      * Injects into {@link GameServer#receivePlayerConnect(ByteBufferReader, IConnection, String)}
      * right after the player is marked as fully connected and added to the world.
@@ -35,5 +43,20 @@ public class GameServerPermissionsMixin {
                 }
             }
         }
+    }
+
+    /**
+     * Injects into the dedicated-server main loop to process queued expiry work on the server thread.
+     */
+    @CInject(
+            method = "main([Ljava/lang/String;)V",
+            target = @CTarget(
+                    value = "INVOKE",
+                    target = "Lzombie/network/RCONServer;update()V",
+                    shift = CTarget.Shift.AFTER
+            )
+    )
+    private static void onServerTick() {
+        PermissionsManager.processPendingExpiryTasks();
     }
 }

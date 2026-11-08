@@ -392,6 +392,11 @@ public final class LuaScriptEnvironment {
         loadingModules.clear();
     }
 
+    /**
+     * Returns a diagnostic representation of this environment.
+     *
+     * @return environment description
+     */
     @Override
     public String toString() {
         return "LuaScriptEnvironment[" + name + "]";
@@ -408,6 +413,13 @@ public final class LuaScriptEnvironment {
             this.environment = environment;
         }
 
+        /**
+         * Resolves a missing global through the visibility policy.
+         *
+         * @param frame     Lua call frame
+         * @param arguments argument count
+         * @return number of returned values
+         */
         @Override
         public int call(LuaCallFrame frame, int arguments) {
             Object key = frame.get(1);
@@ -428,6 +440,13 @@ public final class LuaScriptEnvironment {
             this.environment = environment;
         }
 
+        /**
+         * Resolves a custom module or delegates to the vanilla {@code require}.
+         *
+         * @param frame     Lua call frame
+         * @param arguments argument count
+         * @return number of returned values
+         */
         @Override
         public int call(LuaCallFrame frame, int arguments) {
             Object moduleName = frame.get(0);
