@@ -14,6 +14,7 @@ This documentation is relevant for the following versions:
 
 - [🏃 Game Events](wiki-events.md)
 - [🌐 Network API](wiki-network.md)
+- [🧰 Utility API](wiki-utils.md)
 - [📜 Lua Scripts](wiki-lua.md)
 - [💬 Chat/console commands](wiki-commands.md)
 - [🛡️ Role and Permissions](wiki-permissions.md)

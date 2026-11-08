@@ -14,6 +14,7 @@
 
 - [🏃 Игровые события](wiki-events.md)
 - [🌐 Сетевое API](wiki-network.md)
+- [🧰 API утилит](wiki-utils.md)
 - [📜 Lua-скрипты](wiki-lua.md)
 - [💬 Чат/консоль команды](wiki-commands.md)
 - [🛡️ Права и роли (Permissions)](wiki-permissions.md)
