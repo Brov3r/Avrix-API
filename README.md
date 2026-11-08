@@ -6,7 +6,7 @@
 </div>
 
 <p align="center">
-    <img alt="Project Zomboid Version" src="https://img.shields.io/badge/Project%20Zomboid-42.20.x%2B-blue">
+    <img alt="Project Zomboid Version" src="https://img.shields.io/badge/Project%20Zomboid-42.21%2B-blue">
     <img alt="Java Version" src="https://img.shields.io/badge/Java-25%2B-orange">
     <img alt="Environment" src="https://img.shields.io/badge/Environment-Client%20%7C%20Server-green">
     <a href="https://discord.gg/PdYtyJMTZN">
@@ -29,8 +29,8 @@ Loader to be installed and used as the runtime environment.
 
 ## ✅ Requirements
 
-- [Project Zomboid](https://store.steampowered.com/app/108600/Project_Zomboid/) `42.20.x+`
-- [Avrix Loader](https://github.com/Brov3r/Avrix) `2.2.x+`
+- [Project Zomboid](https://store.steampowered.com/app/108600/Project_Zomboid/) `42.21+`
+- [Avrix Loader](https://github.com/Brov3r/Avrix) `2.4.0+`
 - Java Development Kit (JDK) `25+`
 
 ## 🚀 Installation
@@ -57,6 +57,30 @@ For a dedicated server without Steam integration, start the loader with the
 ```bash
 java -jar ./Avrix-Loader-<version>.jar -nosteam
 ```
+
+## 🛠 Development
+
+Build the plugin:
+
+```bash
+./gradlew build
+```
+
+Build, deploy and launch the game or the dedicated server in one command:
+
+```bash
+./gradlew run                  # Project Zomboid client
+./gradlew run -Ptarget=server  # Project Zomboid dedicated server
+```
+
+The tasks build the shaded JAR, copy it into `<game>/plugins/Avrix-API.jar`
+and launch the Avrix loader from `libs`.
+
+Locations can be overridden when autodetection fails:
+
+- `-PpzClientDir=...` or `PZ_CLIENT_DIR` - client installation directory.
+- `-PpzServerDir=...` or `PZ_SERVER_DIR` - dedicated server directory.
+- `-PavrixLoaderJar=...` - explicit path to the Avrix loader JAR.
 
 ## 🧩 Plugin Development
 

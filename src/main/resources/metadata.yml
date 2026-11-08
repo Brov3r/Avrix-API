@@ -10,8 +10,8 @@ licence: "MIT"
 contacts:
   - "https://github.com/Brov3r/Avrix-API"
 dependencies:
-  avrix-loader: ">=2.2.0"
-  project-zomboid: ">=42.20"
+  avrix-loader: ">=2.4.0"
+  project-zomboid: ">=42.21"
 entrypoint: ""
 mixins:
   - "com.avrix.api.events.LuaEventManagerMixin"
