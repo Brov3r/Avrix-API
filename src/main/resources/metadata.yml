@@ -18,6 +18,7 @@ mixins:
   - "com.avrix.api.mixins.common.LuaManagerMixin"
   - "com.avrix.api.mixins.common.LuaEventManagerMixin"
   - "com.avrix.api.mixins.common.LuaRequireMixin"
+  - "com.avrix.api.mixins.common.PacketReceiveMixin"
   # Server-only game systems.
   - "com.avrix.api.mixins.server.GameServerEventsMixin"
   - "com.avrix.api.mixins.server.GameServerCommandsMixin"
