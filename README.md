@@ -60,6 +60,17 @@ java -jar ./Avrix-Loader-<version>.jar -nosteam
 
 ## 🛠 Development
 
+The Project Zomboid game JAR is proprietary and is not stored in this repository.
+Provide it locally in one of the following ways:
+
+- place `projectzomboid.jar` into `libs/` (for example as `libs/ProjectZomboid-42.21.jar`);
+- pass an explicit path with `-PpzGameJar=...` or `PZ_GAME_JAR`;
+- point Gradle to the game installation with `-PpzClientDir=...` / `PZ_CLIENT_DIR` or
+  `-PpzServerDir=...` / `PZ_SERVER_DIR`.
+
+Gradle looks for `<client>/projectzomboid.jar` and `<server>/java/projectzomboid.jar`
+and also checks the default Steam locations.
+
 Build the plugin:
 
 ```bash
@@ -78,9 +89,19 @@ and launch the Avrix loader from `libs`.
 
 Locations can be overridden when autodetection fails:
 
+- `-PpzGameJar=...` or `PZ_GAME_JAR` - explicit path to the Project Zomboid game JAR.
 - `-PpzClientDir=...` or `PZ_CLIENT_DIR` - client installation directory.
 - `-PpzServerDir=...` or `PZ_SERVER_DIR` - dedicated server directory.
 - `-PavrixLoaderJar=...` - explicit path to the Avrix loader JAR.
+
+Release artifacts are built locally:
+
+```bash
+./gradlew releaseBuildJar
+```
+
+The shaded plugin JAR and sources JAR are written to `build/`. Publish the tag and
+GitHub Release manually after verifying the build.
 
 ## 🧩 Plugin Development
 

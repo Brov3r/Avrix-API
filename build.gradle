@@ -12,6 +12,105 @@ def baseArchiveName = rootProject.name
 def customBuildPath = System.getenv('BUILD_PATH') ?: layout.buildDirectory.get().asFile
 def projectDirectory = layout.projectDirectory.asFile
 
+def pzClientDirProperty = providers.gradleProperty('pzClientDir')
+        .orElse(providers.environmentVariable('PZ_CLIENT_DIR'))
+def pzServerDirProperty = providers.gradleProperty('pzServerDir')
+        .orElse(providers.environmentVariable('PZ_SERVER_DIR'))
+def pzGameJarProperty = providers.gradleProperty('pzGameJar')
+        .orElse(providers.environmentVariable('PZ_GAME_JAR'))
+
+def userHome = System.getProperty('user.home')
+def osName = (System.getProperty('os.name') ?: '').toLowerCase(Locale.ROOT)
+def programFilesX86 = System.getenv('ProgramFiles(x86)') ?: 'C:/Program Files (x86)'
+def programFiles = System.getenv('ProgramFiles') ?: 'C:/Program Files'
+
+def steamCommonRoots = []
+if (osName.contains('win')) {
+    steamCommonRoots = [
+            new File(programFilesX86, 'Steam/steamapps/common'),
+            new File(programFiles, 'Steam/steamapps/common')
+    ]
+} else if (osName.contains('mac')) {
+    steamCommonRoots = [
+            new File(userHome, 'Library/Application Support/Steam/steamapps/common')
+    ]
+} else {
+    steamCommonRoots = [
+            new File(userHome, '.steam/steam/steamapps/common'),
+            new File(userHome, '.local/share/Steam/steamapps/common'),
+            new File(userHome, '.steam/root/steamapps/common'),
+            new File('/usr/local/share/steam/steamapps/common')
+    ]
+}
+
+def clientCandidates = steamCommonRoots.collect { new File(it, 'ProjectZomboid') }
+def serverCandidates = steamCommonRoots.collect { new File(it, 'Project Zomboid Dedicated Server') }
+def defaultClientDir = clientCandidates.find { it.isDirectory() } ?: clientCandidates[0]
+def defaultServerDir = serverCandidates.find { it.isDirectory() } ?: serverCandidates[0]
+
+def resolveConfiguredDirectory = { Provider<String> configured, File fallback ->
+    if (!configured.isPresent()) {
+        return fallback
+    }
+    File directory = new File(configured.get())
+    return directory.isAbsolute() ? directory : new File(projectDirectory, configured.get())
+}
+
+def resolveGameJar = {
+    if (pzGameJarProperty.isPresent()) {
+        File configured = new File(pzGameJarProperty.get())
+        File jar = configured.isAbsolute() ? configured : new File(projectDirectory, pzGameJarProperty.get())
+        if (!jar.isFile()) {
+            throw new GradleException(
+                    "Project Zomboid JAR not found: ${jar}. Check -PpzGameJar=... or PZ_GAME_JAR."
+            )
+        }
+        return jar
+    }
+
+    // Explicitly configured game directories take precedence over the local libs copy.
+    List<File> explicitJars = []
+    if (pzServerDirProperty.isPresent()) {
+        explicitJars.add(new File(
+                resolveConfiguredDirectory(pzServerDirProperty, defaultServerDir),
+                'java/projectzomboid.jar'
+        ))
+    }
+    if (pzClientDirProperty.isPresent()) {
+        explicitJars.add(new File(
+                resolveConfiguredDirectory(pzClientDirProperty, defaultClientDir),
+                'projectzomboid.jar'
+        ))
+    }
+    File explicitJar = explicitJars.find { it.isFile() }
+    if (explicitJar != null) {
+        return explicitJar
+    }
+
+    List<File> libsJars = fileTree(
+            dir: new File(projectDirectory, 'libs'),
+            include: ['ProjectZomboid*.jar', 'projectzomboid*.jar']
+    ).files
+            .findAll { it.isFile() }
+            .sort { it.name }
+    if (!libsJars.isEmpty()) {
+        return libsJars.last()
+    }
+
+    File serverJar = new File(defaultServerDir, 'java/projectzomboid.jar')
+    if (serverJar.isFile()) {
+        return serverJar
+    }
+
+    File clientJar = new File(defaultClientDir, 'projectzomboid.jar')
+    return clientJar.isFile() ? clientJar : null
+}
+
+def gameJarFiles = providers.provider {
+    File jar = resolveGameJar()
+    return jar == null ? [] : [jar]
+}
+
 repositories {
     mavenCentral()
 }
@@ -19,8 +118,18 @@ repositories {
 dependencies {
     // The Avrix loader and Project Zomboid are supplied by the runtime, so they are
     // required for compilation and tests only and must never be bundled into the plugin.
-    compileOnly(fileTree(dir: 'libs', include: '*.jar'))
-    testImplementation(fileTree(dir: 'libs', include: '*.jar'))
+    compileOnly(fileTree(
+            dir: 'libs',
+            include: '*.jar',
+            exclude: ['ProjectZomboid*.jar', 'projectzomboid*.jar']
+    ))
+    testImplementation(fileTree(
+            dir: 'libs',
+            include: '*.jar',
+            exclude: ['ProjectZomboid*.jar', 'projectzomboid*.jar']
+    ))
+    compileOnly(files(gameJarFiles))
+    testImplementation(files(gameJarFiles))
 
     // Test Platform
     testImplementation platform('org.junit:junit-bom:6.1.3')
@@ -46,6 +155,32 @@ java {
 tasks.withType(JavaCompile).configureEach {
     options.encoding = 'UTF-8'
     options.release = 25
+}
+
+def checkGameJar = tasks.register('checkGameJar') {
+    group = 'build'
+    description = 'Verifies that the Project Zomboid game JAR is available for compilation.'
+
+    doLast {
+        File jar = resolveGameJar()
+        if (jar == null) {
+            throw new GradleException(
+                    "Project Zomboid JAR not found. Put projectzomboid.jar into libs/, " +
+                            "pass -PpzGameJar=<path> or set PZ_GAME_JAR, or point " +
+                            "-PpzClientDir=... / -PpzServerDir=... (PZ_CLIENT_DIR / PZ_SERVER_DIR) " +
+                            "to the game installation."
+            )
+        }
+        logger.lifecycle("Using Project Zomboid JAR: ${jar}")
+    }
+}
+
+tasks.named('compileJava') {
+    dependsOn checkGameJar
+}
+
+tasks.named('compileTestJava') {
+    dependsOn checkGameJar
 }
 
 def testWorkingDirectories = new java.util.concurrent.ConcurrentHashMap<String, File>()
@@ -132,40 +267,6 @@ tasks.register('releaseBuildJar') {
 tasks.named('assemble') {
     dependsOn tasks.named('shadowJar')
 }
-
-def pzClientDirProperty = providers.gradleProperty('pzClientDir')
-        .orElse(providers.environmentVariable('PZ_CLIENT_DIR'))
-def pzServerDirProperty = providers.gradleProperty('pzServerDir')
-        .orElse(providers.environmentVariable('PZ_SERVER_DIR'))
-
-def userHome = System.getProperty('user.home')
-def osName = (System.getProperty('os.name') ?: '').toLowerCase(Locale.ROOT)
-def programFilesX86 = System.getenv('ProgramFiles(x86)') ?: 'C:/Program Files (x86)'
-def programFiles = System.getenv('ProgramFiles') ?: 'C:/Program Files'
-
-def steamCommonRoots = []
-if (osName.contains('win')) {
-    steamCommonRoots = [
-            new File(programFilesX86, 'Steam/steamapps/common'),
-            new File(programFiles, 'Steam/steamapps/common')
-    ]
-} else if (osName.contains('mac')) {
-    steamCommonRoots = [
-            new File(userHome, 'Library/Application Support/Steam/steamapps/common')
-    ]
-} else {
-    steamCommonRoots = [
-            new File(userHome, '.steam/steam/steamapps/common'),
-            new File(userHome, '.local/share/Steam/steamapps/common'),
-            new File(userHome, '.steam/root/steamapps/common'),
-            new File('/usr/local/share/steam/steamapps/common')
-    ]
-}
-
-def clientCandidates = steamCommonRoots.collect { new File(it, 'ProjectZomboid') }
-def serverCandidates = steamCommonRoots.collect { new File(it, 'Project Zomboid Dedicated Server') }
-def defaultClientDir = clientCandidates.find { it.isDirectory() } ?: clientCandidates[0]
-def defaultServerDir = serverCandidates.find { it.isDirectory() } ?: serverCandidates[0]
 
 def resolveGameDirectory = { String taskName, Provider<String> configured, File fallback ->
     File directory = fallback

@@ -45,6 +45,10 @@ bin/
 .opencode/
 AGENTS.md
 
+# Project Zomboid game JAR (proprietary, provided locally)
+/libs/ProjectZomboid*.jar
+/libs/projectzomboid*.jar
+
 # Workshop mod build artifacts (produced by buildWorkshopJar)
 /workshop-mod/Contents/mods/Avrix/libs/*.jar
 

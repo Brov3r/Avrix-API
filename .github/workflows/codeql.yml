@@ -50,7 +50,7 @@ jobs:
         - language: actions
           build-mode: none
         - language: java-kotlin
-          build-mode: manual
+          build-mode: none
 
     steps:
     - name: Checkout repository
@@ -74,12 +74,6 @@ jobs:
       with:
         languages: ${{ matrix.language }}
         build-mode: ${{ matrix.build-mode }}
-
-    - name: Build project
-      if: matrix.language == 'java-kotlin' && matrix.build-mode == 'manual'
-      # Build cache must be bypassed, otherwise compilation is restored from cache
-      # and CodeQL has no compiled classes to analyze.
-      run: ./gradlew clean classes --no-build-cache
 
     - name: Perform CodeQL Analysis
       uses: github/codeql-action/analyze@33d7b85da1a04171e211befe2c739303b9a4c066 # v4.39.3
