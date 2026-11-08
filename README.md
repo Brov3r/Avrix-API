@@ -1,146 +1,41 @@
 <div align="center">
     <h1>Avrix API</h1>
-    <p>
-        Public API plugin for the <a href="https://github.com/Brov3r/Avrix">Avrix Loader</a> for Project Zomboid.
-    </p>
 </div>
 
 <p align="center">
-    <img alt="Project Zomboid Version" src="https://img.shields.io/badge/Project%20Zomboid-42.21%2B-blue">
-    <img alt="Java Version" src="https://img.shields.io/badge/Java-25%2B-orange">
-    <img alt="Environment" src="https://img.shields.io/badge/Environment-Client%20%7C%20Server-green">
-    <a href="https://discord.gg/PdYtyJMTZN">
-        <img alt="Discord" src="https://img.shields.io/discord/1248698287997976656?logo=discord&logoColor=%23ffffff&label=Discord&color=%235865F2">
-    </a>
+    <img alt="PZ Version" src="https://img.shields.io/badge/Project_Zomboid-b42+-blue">
+    <img alt="Java Version" src="https://img.shields.io/badge/Java-25-orange">
+    <a href="https://discord.gg/PdYtyJMTZN"><img alt="Discord" src="https://img.shields.io/discord/1248698287997976656?logo=discord&logoColor=%23ffffff&label=Discord&color=%235865F2"></a>
     <img alt="GitHub License" src="https://img.shields.io/github/license/Brov3r/Avrix-API">
 </p>
 
-## 📄 About
+**Avrix API** is the public API plugin for the [Avrix Loader](https://github.com/Brov3r/Avrix), providing shared
+interfaces, contracts and services for Avrix plugins.
 
-**Avrix API** is a public API plugin for the
-[Avrix Loader](https://github.com/Brov3r/Avrix).
+## 📚 Documentation
 
-It provides shared interfaces, contracts, data structures, and services used by
-Avrix plugins. The API is distributed separately from the loader core and must
-be installed as a plugin before plugins that depend on it are started.
+[📄 Open Documentation](./wiki/wiki-language.md "Avrix API Wiki")
 
-Avrix API does not launch Project Zomboid on its own. It requires the Avrix
-Loader to be installed and used as the runtime environment.
+## 🚀 Quick Start
 
-## ✅ Requirements
-
-- [Project Zomboid](https://store.steampowered.com/app/108600/Project_Zomboid/) `42.21+`
-- [Avrix Loader](https://github.com/Brov3r/Avrix) `2.4.0+`
-- Java Development Kit (JDK) `25+`
-
-## 🚀 Installation
-
-1. Download the latest `Avrix-API-<version>.jar` file from the
-   [Releases](https://github.com/Brov3r/Avrix-API/releases) page.
-2. Open the root directory of your Project Zomboid installation.
-3. Create a `plugins` directory if it does not already exist.
-4. Place the downloaded JAR file into the `plugins` directory.
-5. Start Project Zomboid through the Avrix Loader.
-
-Example layout:
-
-```text
-ProjectZomboid/
-├── Avrix-Loader-<version>.jar
-└── plugins/
-    └── Avrix-API-<version>.jar
-```
-
-For a dedicated server without Steam integration, start the loader with the
-`-nosteam` argument:
+1. Install the [Avrix Loader](https://github.com/Brov3r/Avrix) `2.4.0+`.
+2. Download `Avrix-API-<version>.jar` from the [Releases Page](https://github.com/Brov3r/Avrix-API/releases).
+3. Place it into the `plugins/` directory of your Project Zomboid installation.
+4. Launch the game or dedicated server through the loader.
 
 ```bash
-java -jar ./Avrix-Loader-<version>.jar -nosteam
+java -jar ./Avrix-Loader-<version>.jar
 ```
-
-## 🛠 Development
-
-The Project Zomboid game JAR is proprietary and is not stored in this repository.
-Provide it locally in one of the following ways:
-
-- place `projectzomboid.jar` into `libs/` (for example as `libs/ProjectZomboid-42.21.jar`);
-- pass an explicit path with `-PpzGameJar=...` or `PZ_GAME_JAR`;
-- point Gradle to the game installation with `-PpzClientDir=...` / `PZ_CLIENT_DIR` or
-  `-PpzServerDir=...` / `PZ_SERVER_DIR`.
-
-Gradle looks for `<client>/projectzomboid.jar` and `<server>/java/projectzomboid.jar`
-and also checks the default Steam locations.
-
-Build the plugin:
-
-```bash
-./gradlew build
-```
-
-Build, deploy and launch the game or the dedicated server in one command:
-
-```bash
-./gradlew run                  # Project Zomboid client
-./gradlew run -Ptarget=server  # Project Zomboid dedicated server
-```
-
-The tasks build the shaded JAR, copy it into `<game>/plugins/Avrix-API.jar`
-and launch the Avrix loader from `libs`.
-
-Locations can be overridden when autodetection fails:
-
-- `-PpzGameJar=...` or `PZ_GAME_JAR` - explicit path to the Project Zomboid game JAR.
-- `-PpzClientDir=...` or `PZ_CLIENT_DIR` - client installation directory.
-- `-PpzServerDir=...` or `PZ_SERVER_DIR` - dedicated server directory.
-- `-PavrixLoaderJar=...` - explicit path to the Avrix loader JAR.
-
-Release artifacts are built locally:
-
-```bash
-./gradlew releaseBuildJar
-```
-
-The shaded plugin JAR and sources JAR are written to `build/`. Publish the tag and
-GitHub Release manually after verifying the build.
 
 ## 🧩 Plugin Development
 
-Add the Avrix API JAR to your plugin's compile-time dependencies.
-
-With Gradle Groovy DSL:
+Declare the API as `compileOnly` — the runtime instance is provided by the loader:
 
 ```groovy
 dependencies {
     compileOnly files('libs/Avrix-API-<version>.jar')
 }
 ```
-
-The API should normally be declared as `compileOnly`, because the runtime
-instance is provided by Avrix Loader. Do not bundle `Avrix-API` into your plugin
-JAR unless your deployment model explicitly requires it.
-
-## 📚 Documentation
-
-For loader and plugin development documentation, see the
-[Avrix Wiki](https://github.com/Brov3r/Avrix/wiki).
-
-API Wiki: [See](wiki/wiki-language.md)
-
-## 🤝 Contributing
-
-Contributions, bug reports, and suggestions are welcome.
-
-Before opening a pull request:
-
-1. Check the existing issues and pull requests.
-2. Describe the purpose of your change.
-3. Keep public API changes documented.
-4. Verify that the project builds successfully with JDK 25 or higher.
-
-## 💬 Community
-
-Join the [Avrix Discord server](https://discord.gg/PdYtyJMTZN) to ask questions,
-discuss development, and share feedback.
 
 ## ⚖️ License
 
