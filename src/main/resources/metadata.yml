@@ -6,7 +6,7 @@ version: %VERSION%
 environment: "*"
 authors:
   - "Brov3r"
-licence: "MIT"
+license: "MIT"
 contacts:
   - "https://github.com/Brov3r/Avrix-API"
 dependencies:
@@ -14,9 +14,11 @@ dependencies:
   project-zomboid: ">=42.21"
 entrypoint: ""
 mixins:
-  - "com.avrix.api.events.LuaEventManagerMixin"
-  - "com.avrix.api.events.GameServerEventsMixin"
-  - "com.avrix.api.commands.GameServerCommandsMixin"
-  - "com.avrix.api.permissions.GameServerPermissionsMixin"
-  - "com.avrix.api.permissions.RolesMixin"
-  - "com.avrix.api.permissions.ServerWorldDatabaseMixin"
+  # Common: active on both client and dedicated server.
+  - "com.avrix.api.mixins.common.LuaEventManagerMixin"
+  # Server-only game systems.
+  - "com.avrix.api.mixins.server.GameServerEventsMixin"
+  - "com.avrix.api.mixins.server.GameServerCommandsMixin"
+  - "com.avrix.api.mixins.server.GameServerPermissionsMixin"
+  - "com.avrix.api.mixins.server.RolesMixin"
+  - "com.avrix.api.mixins.server.ServerWorldDatabaseMixin"

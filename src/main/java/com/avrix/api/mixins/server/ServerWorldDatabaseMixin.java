@@ -1,5 +1,8 @@
-package com.avrix.api.permissions;
+package com.avrix.api.mixins.server;
 
+import com.avrix.api.permissions.DatabasePermissionsHelper;
+import com.avrix.api.permissions.ExtendedRole;
+import com.avrix.api.permissions.PermissionsManager;
 import net.lenni0451.classtransform.annotations.CTarget;
 import net.lenni0451.classtransform.annotations.CTransformer;
 import net.lenni0451.classtransform.annotations.injection.CInject;

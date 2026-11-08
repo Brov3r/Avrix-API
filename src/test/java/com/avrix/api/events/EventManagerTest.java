@@ -526,4 +526,169 @@ class EventManagerTest {
             EventManager.unregister(listener);
         }
     }
+
+    // =========================================================================
+    // Advanced Registration, Ownership and Dynamic Event Tests
+    // =========================================================================
+
+    @Nested
+    @DisplayName("Advanced Registration and Dynamic Events")
+    class AdvancedRegistrationTests {
+
+        static final AtomicInteger STATIC_CALLS = new AtomicInteger();
+
+        static class AnnotatedBaseListener {
+            final AtomicInteger calls = new AtomicInteger();
+
+            @SubscribeEvent(custom = "Test_Inherited")
+            void onInherited() {
+                calls.incrementAndGet();
+            }
+        }
+
+        static class InheritedListener extends AnnotatedBaseListener {
+        }
+
+        static class OverridingListener extends AnnotatedBaseListener {
+            final AtomicInteger overrideCalls = new AtomicInteger();
+
+            @Override
+            void onInherited() {
+                overrideCalls.incrementAndGet();
+            }
+        }
+
+        static class StaticListener {
+            @SubscribeEvent(custom = "Test_Static")
+            static void onStatic() {
+                STATIC_CALLS.incrementAndGet();
+            }
+        }
+
+        static class CountingListener {
+            final AtomicInteger calls = new AtomicInteger();
+
+            @SubscribeEvent(custom = "Test_Duplicate")
+            void onDuplicate() {
+                calls.incrementAndGet();
+            }
+        }
+
+        @Test
+        @DisplayName("Should register annotated methods inherited from a superclass")
+        void shouldRegisterInheritedMethod() {
+            InheritedListener listener = new InheritedListener();
+            EventManager.register(listener);
+            try {
+                EventManager.invoke("Test_Inherited");
+                assertThat(listener.calls.get()).isEqualTo(1);
+            } finally {
+                EventManager.unregister(listener);
+            }
+        }
+
+        @Test
+        @DisplayName("Should not register an unannotated override of an annotated base method")
+        void shouldNotRegisterUnannotatedOverride() {
+            OverridingListener listener = new OverridingListener();
+            EventManager.register(listener);
+            try {
+                EventManager.invoke("Test_Inherited");
+                assertThat(listener.calls.get()).isZero();
+                assertThat(listener.overrideCalls.get()).isZero();
+            } finally {
+                EventManager.unregister(listener);
+            }
+        }
+
+        @Test
+        @DisplayName("Should support static annotated listener methods")
+        void shouldRegisterStaticMethod() {
+            STATIC_CALLS.set(0);
+            StaticListener listener = new StaticListener();
+            EventManager.register(listener);
+            try {
+                EventManager.invoke("Test_Static");
+                assertThat(STATIC_CALLS.get()).isEqualTo(1);
+            } finally {
+                EventManager.unregister(listener);
+            }
+        }
+
+        @Test
+        @DisplayName("Should ignore duplicate registration of the same listener method")
+        void shouldIgnoreDuplicateRegistration() {
+            CountingListener listener = new CountingListener();
+            EventManager.register(listener);
+            EventManager.register(listener);
+            try {
+                EventManager.invoke("Test_Duplicate");
+                assertThat(listener.calls.get()).isEqualTo(1);
+            } finally {
+                EventManager.unregister(listener);
+            }
+        }
+
+        @Test
+        @DisplayName("Should unregister all listeners associated with an owner")
+        void shouldUnregisterAllByOwner() {
+            Object owner = new Object();
+            CountingListener first = new CountingListener();
+            CountingListener second = new CountingListener();
+
+            EventManager.register(owner, first);
+            EventManager.register(owner, second);
+            try {
+                EventManager.invoke("Test_Duplicate");
+                assertThat(first.calls.get()).isEqualTo(1);
+                assertThat(second.calls.get()).isEqualTo(1);
+
+                EventManager.unregisterAll(owner);
+                EventManager.invoke("Test_Duplicate");
+                assertThat(first.calls.get()).isEqualTo(1);
+                assertThat(second.calls.get()).isEqualTo(1);
+            } finally {
+                EventManager.unregisterAll(owner);
+            }
+        }
+
+        @Test
+        @DisplayName("Should expose listener diagnostics")
+        void shouldExposeListenerDiagnostics() {
+            CountingListener listener = new CountingListener();
+            EventManager.register(listener);
+            try {
+                assertThat(EventManager.hasListeners("Test_Duplicate")).isTrue();
+                assertThat(EventManager.getSubscriberCount("Test_Duplicate")).isEqualTo(1);
+                assertThat(EventManager.getRegisteredEvents()).contains("Test_Duplicate");
+            } finally {
+                EventManager.unregister(listener);
+            }
+        }
+
+        @Test
+        @DisplayName("Should normalize custom event names consistently")
+        void shouldNormalizeCustomEventName() {
+            CountingListener listener = new CountingListener();
+            CustomEvent event = new CustomEvent("  Test_Duplicate  ");
+
+            assertThat(event.getName()).isEqualTo("Test_Duplicate");
+            EventManager.register(listener);
+            try {
+                EventManager.invoke(event);
+                assertThat(listener.calls.get()).isEqualTo(1);
+            } finally {
+                EventManager.unregister(listener);
+            }
+        }
+
+        @Test
+        @DisplayName("Should expose and refresh the dynamic game event catalog safely")
+        void shouldExposeDynamicGameEventCatalog() {
+            assertThatCode(EventManager::refreshGameEvents).doesNotThrowAnyException();
+            assertThat(EventManager.getKnownGameEvents()).isNotNull();
+            assertThat(EventManager.isGameEvent(null)).isFalse();
+            assertThat(EventManager.isGameEvent("  ")).isFalse();
+        }
+    }
 }

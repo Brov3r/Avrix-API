@@ -5,7 +5,11 @@ import java.util.HashMap;
 import java.util.Map;
 
 /**
- * Registry of standard Project Zomboid Lua events with signature documentation.
+ * Convenience catalog of standard Project Zomboid Lua events with signature documentation.
+ * <p>
+ * Game events are dispatched dynamically by name, so this enum is not required for
+ * subscribing to new game events. The runtime catalog is available through
+ * {@link EventManager#getKnownGameEvents()}.
  * <p>
  * Implements {@link Event} for seamless integration with the Avrix event dispatch pipeline.
  */

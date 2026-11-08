@@ -19,7 +19,8 @@ public record CustomEvent(String name) implements Event {
      */
     public CustomEvent {
         Objects.requireNonNull(name, "Event name cannot be null");
-        if (name.isBlank()) {
+        name = name.strip();
+        if (name.isEmpty()) {
             throw new IllegalArgumentException("Event name cannot be empty or blank");
         }
     }

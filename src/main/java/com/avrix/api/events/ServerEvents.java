@@ -16,7 +16,7 @@ public enum ServerEvents implements Event {
     CLIENT_CONNECT("OnClientConnect"),
 
     /**
-     * Triggered when a network connection is terminated or timed out.
+     * Triggered before a network connection is cleaned up after termination or timeout.
      * <p><b>Parameters:</b></p>
      * <ul>
      *   <li>{@code UdpConnection connection} — the terminating client UDP connection.</li>

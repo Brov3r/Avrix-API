@@ -2,64 +2,100 @@
 
 ## 🏃 Game Events
 
-The **Avrix** event system allows you to intercept any vanilla game events, define strict execution order via
-priorities, and create and trigger custom events for inter-plugin communication.
+The **Avrix** event system lets plugins receive Project Zomboid events, define execution order via priorities, and
+create custom events for inter-plugin communication.
+
+Game event names are discovered dynamically from Project Zomboid. You do not need to add constants to the API when the
+game adds or renames an event.
+
+Events are notifications only. Avrix does not cancel game actions from an event handler.
 
 ---
 
-### Subscribing to Standard Game Events
+### Subscribing to Game Events
 
-To subscribe to events, declare a method annotated with `@SubscribeEvent` and pass the target `DefaultEvents` constant.
+Use the `@SubscribeEvent` annotation with either a `DefaultEvents` constant or the event name as a string.
 
 ```java
 package com.example.plugin;
 
-import com.avrix.api.events.DefaultEvents;
 import com.avrix.api.events.SubscribeEvent;
 import zombie.characters.IsoPlayer;
-import zombie.inventory.types.HandWeapon;
+import zombie.characters.IsoZombie;
 
 public class PlayerEventListener {
 
-    /**
-     * Triggered when a player dies.
-     */
-    @SubscribeEvent(DefaultEvents.ON_PLAYER_DEATH)
+    @SubscribeEvent(custom = "OnZombieUpdate")
+    public void onZombieUpdate(IsoZombie zombie) {
+        // Runs whenever Project Zomboid triggers the OnZombieUpdate event.
+    }
+
+    @SubscribeEvent(custom = "OnPlayerDeath")
     public void onPlayerDeath(IsoPlayer player) {
         System.out.println("Player died: " + player.getUsername());
     }
 
-    /**
-     * If event parameters are not required, the method can be declared with no arguments.
-     */
-    @SubscribeEvent(DefaultEvents.ON_TICK)
+    @SubscribeEvent(custom = "OnTick")
     public void onTick() {
-        // Executed on every game tick
+        // Parameters are optional.
     }
 }
 ```
+
+`DefaultEvents` remains available as a convenience catalog:
+
+```java
+@SubscribeEvent(DefaultEvents.ON_PLAYER_DEATH)
+public void onPlayerDeath(IsoPlayer player) {
+    // ...
+}
+```
+
+New game events are delivered automatically. To inspect the event names known to the current game runtime:
+
+```java
+Set<String> gameEvents = EventManager.getKnownGameEvents();
+```
+
+Call `EventManager.refreshGameEvents()` after registering custom Lua events if you need them in the catalog immediately.
 
 ---
 
 ### Registering and Unregistering Listeners
 
-Listeners are registered through the static `EventManager` class during plugin initialization:
+Register listeners during plugin initialization. Passing `PluginData` as the owner lets Avrix remove every listener
+belonging to the plugin in one call.
 
 ```java
+package com.example.plugin;
+
+import com.avrix.api.events.EventManager;
+import com.avrix.plugins.Plugin;
+import com.avrix.plugins.PluginData;
+
 public class ExamplePlugin implements Plugin {
 
     private final PlayerEventListener playerListener = new PlayerEventListener();
+    private PluginData pluginData;
 
     @Override
-    public void onInitialize() {
-        // Register all annotated methods in the listener instance
-        EventManager.register(playerListener);
+    public void onInitialize(PluginData pluginData) {
+        this.pluginData = pluginData;
+        EventManager.register(pluginData, playerListener);
+    }
 
-        // Unregister listener when unloading or when no longer needed
-        // EventManager.unregister(playerListener);
+    @Override
+    public void onShutdown() {
+        EventManager.unregisterAll(pluginData);
     }
 }
 ```
+
+You can also use `EventManager.register(listener)` and `EventManager.unregister(listener)` when owner-scoped
+registration is not needed.
+
+Registering the same listener method twice does not create duplicate calls. Static and inherited annotated methods
+are supported.
 
 ---
 
@@ -78,13 +114,11 @@ The `priority` parameter accepts any integer (`int`) value. **Higher** values ex
 ```java
 public class PriorityExampleListener {
 
-    // Runs earlier than standard listeners
     @SubscribeEvent(value = DefaultEvents.ON_GAME_START, priority = EventManager.PRIORITY_HIGH)
     public void onEarlyGameStart() {
         System.out.println("Early initialization of plugin modules...");
     }
 
-    // Runs last after all other listeners
     @SubscribeEvent(value = DefaultEvents.ON_GAME_START, priority = EventManager.PRIORITY_LOWEST)
     public void onLateGameStart() {
         System.out.println("Final inspection of world state.");
@@ -92,15 +126,35 @@ public class PriorityExampleListener {
 }
 ```
 
+For listeners with equal priorities, registration order is preserved.
+
 ---
 
 ### Custom Plugin Events
 
-Plugins can define and dispatch custom events in two ways.
+#### Option A: Named Event (Recommended)
 
-#### Option A: Custom Enum (Recommended)
+Use a namespaced name to avoid collisions with game events and other plugins:
 
-Create a dedicated `enum` implementing the `com.avrix.api.events.Event` contract:
+```java
+Event event = Event.custom("economy:balance_changed");
+
+// Notify Java listeners only.
+EventManager.publish(event, isoPlayer, 2500.0);
+```
+
+Subscription:
+
+```java
+@SubscribeEvent(custom = "economy:balance_changed")
+public void onBalanceChanged(IsoPlayer player, double newBalance) {
+    System.out.printf("Player %s balance updated: $%.2f%n", player.getUsername(), newBalance);
+}
+```
+
+#### Option B: Custom Enum
+
+A custom enum implementing `Event` is useful when you want compile-time constants:
 
 ```java
 package com.example.economy;
@@ -108,8 +162,8 @@ package com.example.economy;
 import com.avrix.api.events.Event;
 
 public enum EconomyEvents implements Event {
-    ON_BALANCE_CHANGE("Economy_OnBalanceChange"),
-    ON_SHOP_PURCHASE("Economy_OnShopPurchase");
+    ON_BALANCE_CHANGE("economy:balance_changed"),
+    ON_SHOP_PURCHASE("economy:shop_purchase");
 
     private final String eventName;
 
@@ -124,37 +178,48 @@ public enum EconomyEvents implements Event {
 }
 ```
 
-**Subscription:**
-
 ```java
-
-@SubscribeEvent(custom = "Economy_OnBalanceChange")
-public void onBalanceChanged(IsoPlayer player, double newBalance) {
-    System.out.printf("Player %s balance updated: $%.2f%n", player.getUsername(), newBalance);
-}
+EventManager.publish(EconomyEvents.ON_BALANCE_CHANGE, isoPlayer, 2500.0);
 ```
 
-**Triggering the event in code:**
+---
+
+### Sending Custom Events to Lua
+
+Avrix can forward a Java event to Project Zomboid Lua callbacks:
 
 ```java
-// Dispatch via Event object
-EventManager.invoke(EconomyEvents.ON_BALANCE_CHANGE, isoPlayer, 2500.0);
+// Notify Java listeners and Lua callbacks.
+EventManager.publishBoth(event, isoPlayer, 2500.0);
+
+// Forward to Lua only.
+EventManager.publishToLua(event, isoPlayer, 2500.0);
 ```
 
-#### Option B: Direct String Constant
+Lua receives the same positional arguments. Up to eight arguments are supported, matching the Project Zomboid event
+API. Forwarding is ignored when the Lua environment is not ready. Forwarded events do not re-enter the Java listener
+bus recursively.
 
-```java
-// Subscription
-@SubscribeEvent(custom = "MyMod_CustomEvent")
-public void onCustom(String payload, int level) {
-    // ...
-}
+Lua mods can register a callback through the standard `Events` table:
 
-// Dispatch
-EventManager.
+```lua
+local function onBalanceChanged(player, newBalance)
+    print("Balance changed: " .. tostring(newBalance))
+end
 
-invoke("MyMod_CustomEvent","test_data",5);
+Events["economy:balance_changed"].Add(onBalanceChanged)
 ```
+
+---
+
+### Threading
+
+- Project Zomboid game events are dispatched on the main game thread. Events triggered from other game threads are
+  queued and replayed on the main thread.
+- Custom Java events are dispatched on the thread that calls `publish` or `invoke`.
+- `publishBoth` performs the Java dispatch first, then forwards the event to Lua.
+
+Listener methods should not block the game thread.
 
 ---
 
@@ -168,3 +233,20 @@ Avrix includes a built-in type adapter:
     - Reference types (`String`, `IsoPlayer`, etc.) receive `null`.
     - Primitive types (`int`, `boolean`, `float`, etc.) receive default values (`0`, `false`, `0.0f`), preventing
       `NullPointerException` during unboxing.
+3. **Exact wrapper types** are passed directly and are the fastest path. Primitive conversions are performed only when
+   necessary.
+
+Listener methods should return `void`. Return values are ignored and produce a warning during registration.
+
+---
+
+### Diagnostics
+
+```java
+EventManager.hasListeners("OnZombieUpdate");
+EventManager.getSubscriberCount("OnZombieUpdate");
+EventManager.getRegisteredEvents();
+EventManager.getKnownGameEvents();
+```
+
+A listener method that throws an exception is logged and does not prevent other listeners from running.

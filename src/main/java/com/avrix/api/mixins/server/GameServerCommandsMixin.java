@@ -1,5 +1,6 @@
-package com.avrix.api.commands;
+package com.avrix.api.mixins.server;
 
+import com.avrix.api.commands.CommandManager;
 import net.lenni0451.classtransform.annotations.CTransformer;
 import net.lenni0451.classtransform.annotations.injection.COverride;
 import zombie.characters.Role;

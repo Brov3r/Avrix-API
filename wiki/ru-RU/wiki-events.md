@@ -2,64 +2,101 @@
 
 ## 🏃 Игровые события
 
-Система событий **Avrix** позволяет перехватывать любые ванильные события игры, настраивать строгий порядок их обработки
-через приоритеты, а также создавать и вызывать собственные кастомные события для взаимодействия между плагинами.
+Система событий **Avrix** позволяет плагинам получать события Project Zomboid, задавать порядок выполнения через
+приоритеты и создавать собственные события для взаимодействия между плагинами.
+
+Имена игровых событий определяются динамически из Project Zomboid. При добавлении или переименовании события в игре
+не нужно добавлять новую константу в API.
+
+События являются только уведомлениями. Avrix не отменяет игровые действия из обработчика события.
 
 ---
 
-### Подписка на стандартные события игры
+### Подписка на игровые события
 
-Для подписки на события объявите метод с аннотацией `@SubscribeEvent` и передайте в неё константу `DefaultEvents`.
+Используйте аннотацию `@SubscribeEvent` с константой `DefaultEvents` или со строковым именем события.
 
 ```java
 package com.example.plugin;
 
-import com.avrix.api.events.DefaultEvents;
 import com.avrix.api.events.SubscribeEvent;
 import zombie.characters.IsoPlayer;
-import zombie.inventory.types.HandWeapon;
+import zombie.characters.IsoZombie;
 
 public class PlayerEventListener {
 
-    /**
-     * Вызывается при смерти игрока.
-     */
-    @SubscribeEvent(DefaultEvents.ON_PLAYER_DEATH)
+    @SubscribeEvent(custom = "OnZombieUpdate")
+    public void onZombieUpdate(IsoZombie zombie) {
+        // Вызывается при каждом событии OnZombieUpdate от Project Zomboid.
+    }
+
+    @SubscribeEvent(custom = "OnPlayerDeath")
     public void onPlayerDeath(IsoPlayer player) {
         System.out.println("Игрок погиб: " + player.getUsername());
     }
 
-    /**
-     * Если параметры события не нужны, метод может быть без аргументов.
-     */
-    @SubscribeEvent(DefaultEvents.ON_TICK)
+    @SubscribeEvent(custom = "OnTick")
     public void onTick() {
-        // Выполняется каждый игровой тик
+        // Параметры необязательны.
     }
 }
 ```
+
+`DefaultEvents` остаётся доступным как удобный каталог:
+
+```java
+@SubscribeEvent(DefaultEvents.ON_PLAYER_DEATH)
+public void onPlayerDeath(IsoPlayer player) {
+    // ...
+}
+```
+
+Новые игровые события доставляются автоматически. Посмотреть известные текущей игре имена можно так:
+
+```java
+Set<String> gameEvents = EventManager.getKnownGameEvents();
+```
+
+Если вы регистрируете собственные Lua-события и хотите сразу видеть их в каталоге, вызовите
+`EventManager.refreshGameEvents()`.
 
 ---
 
 ### Регистрация и отписка слушателей
 
-Регистрация объектов со слушателями выполняется через статический класс `EventManager` при инициализации плагина:
+Регистрируйте слушателей при инициализации плагина. Если передать `PluginData` как владельца, Avrix сможет одной
+командой удалить все слушатели плагина.
 
 ```java
+package com.example.plugin;
+
+import com.avrix.api.events.EventManager;
+import com.avrix.plugins.Plugin;
+import com.avrix.plugins.PluginData;
+
 public class ExamplePlugin implements Plugin {
 
     private final PlayerEventListener playerListener = new PlayerEventListener();
+    private PluginData pluginData;
 
     @Override
-    public void onInitialize() {
-        // Регистрация всех аннотированных методов в объекте
-        EventManager.register(playerListener);
+    public void onInitialize(PluginData pluginData) {
+        this.pluginData = pluginData;
+        EventManager.register(pluginData, playerListener);
+    }
 
-        // Отписка слушателей при выгрузке плагина или при необходимости
-        // EventManager.unregister(playerListener);
+    @Override
+    public void onShutdown() {
+        EventManager.unregisterAll(pluginData);
     }
 }
 ```
+
+Если привязка к владельцу не нужна, используйте `EventManager.register(listener)` и
+`EventManager.unregister(listener)`.
+
+Повторная регистрация того же метода не создаёт дублирующих вызовов. Статические и унаследованные
+аннотированные методы поддерживаются.
 
 ---
 
@@ -78,13 +115,11 @@ public class ExamplePlugin implements Plugin {
 ```java
 public class PriorityExampleListener {
 
-    // Выполнится раньше обычных слушателей
     @SubscribeEvent(value = DefaultEvents.ON_GAME_START, priority = EventManager.PRIORITY_HIGH)
     public void onEarlyGameStart() {
         System.out.println("Ранняя инициализация модулей плагина...");
     }
 
-    // Выполнится позже всех
     @SubscribeEvent(value = DefaultEvents.ON_GAME_START, priority = EventManager.PRIORITY_LOWEST)
     public void onLateGameStart() {
         System.out.println("Финальный опрос состояния мира.");
@@ -92,15 +127,35 @@ public class PriorityExampleListener {
 }
 ```
 
+Для слушателей с одинаковым приоритетом сохраняется порядок регистрации.
+
 ---
 
 ### Кастомные события плагинов
 
-Плагины могут определять и вызывать собственные события двумя способами.
+#### Вариант А: Именованное событие (рекомендуется)
 
-#### Вариант А: Через собственный Enum (Рекомендуется)
+Используйте пространство имён, чтобы не пересекаться с игровыми событиями и другими плагинами:
 
-Создайте собственный `enum`, реализующий контракт `com.avrix.api.events.Event`:
+```java
+Event event = Event.custom("economy:balance_changed");
+
+// Только Java-слушатели.
+EventManager.publish(event, isoPlayer, 2500.0);
+```
+
+Подписка:
+
+```java
+@SubscribeEvent(custom = "economy:balance_changed")
+public void onBalanceChanged(IsoPlayer player, double newBalance) {
+    System.out.printf("Баланс игрока %s обновлен: $%.2f%n", player.getUsername(), newBalance);
+}
+```
+
+#### Вариант Б: Собственный Enum
+
+Собственный enum, реализующий `Event`, удобен, если нужны compile-time константы:
 
 ```java
 package com.example.economy;
@@ -108,8 +163,8 @@ package com.example.economy;
 import com.avrix.api.events.Event;
 
 public enum EconomyEvents implements Event {
-    ON_BALANCE_CHANGE("Economy_OnBalanceChange"),
-    ON_SHOP_PURCHASE("Economy_OnShopPurchase");
+    ON_BALANCE_CHANGE("economy:balance_changed"),
+    ON_SHOP_PURCHASE("economy:shop_purchase");
 
     private final String eventName;
 
@@ -124,35 +179,48 @@ public enum EconomyEvents implements Event {
 }
 ```
 
-**Подписка:**
-
 ```java
-
-@SubscribeEvent(custom = "Economy_OnBalanceChange")
-public void onBalanceChanged(IsoPlayer player, double newBalance) {
-    System.out.printf("Баланс игрока %s обновлен: $%.2f%n", player.getUsername(), newBalance);
-}
+EventManager.publish(EconomyEvents.ON_BALANCE_CHANGE, isoPlayer, 2500.0);
 ```
 
-**Вызов события в коде:**
+---
+
+### Передача кастомных событий в Lua
+
+Avrix умеет передавать Java-событие в Lua-callback'и Project Zomboid:
 
 ```java
-// Вызов по объекту Event
-EventManager.invoke(EconomyEvents.ON_BALANCE_CHANGE, isoPlayer, 2500.0);
+// Уведомить Java-слушателей и Lua-callback'и.
+EventManager.publishBoth(event, isoPlayer, 2500.0);
+
+// Только в Lua.
+EventManager.publishToLua(event, isoPlayer, 2500.0);
 ```
 
-#### Вариант Б: Через прямую строковую константу
+Lua получает те же позиционные аргументы. Поддерживается до восьми аргументов — столько же, сколько в API событий
+Project Zomboid. Передача игнорируется, пока Lua-окружение не готово. Пересланное событие не вызывает Java-слушателей
+повторно.
 
-```java
-// Подписка
-@SubscribeEvent(custom = "MyMod_CustomEvent")
-public void onCustom(String payload, int level) {
-    // ...
-}
+Lua-моды могут зарегистрировать callback через стандартную таблицу `Events`:
 
-// Вызов
-EventManager.invoke("MyMod_CustomEvent","test_data",5);
+```lua
+local function onBalanceChanged(player, newBalance)
+    print("Balance changed: " .. tostring(newBalance))
+end
+
+Events["economy:balance_changed"].Add(onBalanceChanged)
 ```
+
+---
+
+### Потоки
+
+- Игровые события Project Zomboid доставляются в главном игровом потоке. События из других потоков ставятся в
+  очередь и выполняются позже в главном потоке.
+- Кастомные Java-события выполняются в том потоке, который вызвал `publish` или `invoke`.
+- `publishBoth` сначала уведомляет Java-слушателей, затем передаёт событие в Lua.
+
+Обработчики не должны блокировать игровой поток.
 
 ---
 
@@ -160,9 +228,27 @@ EventManager.invoke("MyMod_CustomEvent","test_data",5);
 
 В Avrix встроен адаптер типов:
 
-1. **Числа**: Если событие передает `number`, вы можете свободно принимать его как `int`, `long`, `float` или `double` —
+1. **Числа**: Если событие передаёт `number`, вы можете принимать его как `int`, `long`, `float` или `double` —
    `EventManager` автоматически преобразует значение без ошибок `ClassCastException`.
-2. **Недостающие аргументы**: Если событие вызвалось с меньшим количеством аргументов, чем указано в методе:
-    - Для ссылочных типов (`String`, `IsoPlayer` и т.д.) передается `null`.
-    - Для примитивных типов (`int`, `boolean`, `float`) подставляются значения по умолчанию (`0`, `false`, `0.0f`), что
-      гарантирует защиту от `NullPointerException` при анбоксинге.
+2. **Недостающие аргументы**: Если событие вызвано с меньшим количеством аргументов, чем указано в методе:
+    - Для ссылочных типов (`String`, `IsoPlayer` и т.д.) передаётся `null`.
+    - Для примитивных типов (`int`, `boolean`, `float`) подставляются значения по умолчанию (`0`, `false`, `0.0f`),
+      что защищает от `NullPointerException` при анбоксинге.
+3. **Точные wrapper-типы** передаются напрямую и работают быстрее всего. Примитивные преобразования выполняются
+   только при необходимости.
+
+Методы-слушатели должны возвращать `void`. Возвращаемые значения игнорируются, а при регистрации выводится
+предупреждение.
+
+---
+
+### Диагностика
+
+```java
+EventManager.hasListeners("OnZombieUpdate");
+EventManager.getSubscriberCount("OnZombieUpdate");
+EventManager.getRegisteredEvents();
+EventManager.getKnownGameEvents();
+```
+
+Если обработчик выбрасывает исключение, оно логируется и не мешает остальным слушателям.
