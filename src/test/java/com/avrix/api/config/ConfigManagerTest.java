@@ -15,7 +15,6 @@ import java.io.File;
 import java.io.FileOutputStream;
 import java.io.IOException;
 import java.lang.reflect.Constructor;
-import java.lang.reflect.Field;
 import java.lang.reflect.InvocationTargetException;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.FileVisitResult;
@@ -54,15 +53,7 @@ class ConfigManagerTest {
     }
 
     private void cleanupEnvironment() throws IOException {
-        try {
-            Field cacheField = ConfigManager.class.getDeclaredField("CACHE");
-            cacheField.setAccessible(true);
-            @SuppressWarnings("unchecked")
-            Map<String, Config<?>> cache = (Map<String, Config<?>>) cacheField.get(null);
-            cache.clear();
-        } catch (Exception ex) {
-            throw new RuntimeException("Failed to reset ConfigManager cache via reflection", ex);
-        }
+        ConfigManager.unloadAll();
 
         String pluginsRootName = Constants.PLUGINS_FOLDER_NAME != null ? Constants.PLUGINS_FOLDER_NAME : "plugins";
         Path pluginsDir = Path.of(pluginsRootName).toAbsolutePath();

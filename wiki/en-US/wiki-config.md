@@ -7,7 +7,8 @@ YAML files. It is built on top of the **SpongePowered Configurate 4** library an
 architecture and the `KnotClassLoader` flat classloading environment.
 
 The subsystem guarantees absolute default resource isolation for every mod, supports modern immutable data models (Java
-25 Records), schemaless dynamic access without class declarations, and thread-safe runtime mutations.
+25 Records), schemaless dynamic access without class declarations, thread-safe runtime mutations, and atomic persistence.
+Loaded configurations are cached by normalized path, and each file can be bound to only one model type at a time.
 
 ---
 
@@ -34,6 +35,10 @@ the specific plugin** (`PluginData.getPluginFile()`).
 - 📦 **File is missing on disk** — it is automatically extracted from the root or subfolder of your plugin JAR archive,
   preserving all original comments and structure.
 - 📝 **Resource is not in JAR** — an empty configuration file is created on disk.
+
+Paths are validated before use: absolute paths and paths that escape `plugins/{pluginId}` are rejected. Writes go
+through a temporary file and an atomic move where the filesystem supports it, so a crash cannot leave a partially
+written configuration. The leading comment header of a file is preserved across saves.
 
 ---
 
@@ -187,37 +192,27 @@ The `Config<T>` container provides full lifecycle management methods:
 ```java
 Config<ModConfig> configHolder = ConfigManager.loadDefaultConfig(pluginData, ModConfig.class);
 
-// 1. Full instance replacement and save
-configHolder.
+// 1. Full instance replacement (call save() to persist it)
+configHolder.set(new ModConfig("New Title", 200, false, null));
+configHolder.save();
 
-set(new ModConfig("New Title", 200,false,null));
-        configHolder.
+// 2. Atomic update of an immutable record (saved automatically)
+ModConfig updated = configHolder.updateAndGet(current -> new ModConfig(
+        "Updated Title",
+        current.maxZombies() + 50,
+        current.pvpEnabled(),
+        current.modules()
+));
 
-save();
+// 3. Mutate a mutable POJO in place (saved automatically)
+mutableConfig.update(current -> current.setMaxZombies(current.getMaxZombies() + 10));
 
-// 2. Atomic update using a Consumer
-configHolder.
-
-update(current ->{
-        configHolder.
-
-set(new ModConfig(
-            "Updated Title",
-    current.maxZombies() +50,
-        current.
-
-pvpEnabled(),
-            current.
-
-modules()
-    ));
-            });
-
-// 3. Force reload from disk (e.g., triggered by a /reload command)
-            configHolder.
-
-reload();
+// 4. Force reload from disk (e.g., triggered by a /reload command)
+configHolder.reload();
 ```
+
+`Config` methods are thread-safe. `update` and `updateAndGet` hold the write lock while applying the change and
+persisting it, so concurrent updates to the same file are serialized.
 
 ---
 
@@ -228,10 +223,14 @@ reload();
 | `loadDefaultConfig(pluginData, type)` | `Config<T>`                          | 📥 Loads/extracts the mod's `config.yml` into a typed model.      |
 | `loadDefaultConfig(pluginData)`       | `Config<CommentedConfigurationNode>` | 🌳 Loads/extracts `config.yml` into a dynamic raw node tree.      |
 | `load(pluginData, fileName, type)`    | `Config<T>`                          | 📄 Loads/extracts a file by relative path (e.g., `lang/en.yml`).  |
-| `get(pluginId, fileName)`             | `Config<T>`                          | 🔍 Retrieves an already loaded configuration instance from cache. |
-| `resolvePath(pluginId, fileName)`     | `Path`                               | 📍 Returns the normalized absolute file path on disk.             |
-| `saveAll()`                           | `void`                               | 💾 Persists all cached configurations across all mods to disk.    |
-| `reloadAll()`                         | `void`                               | 🔄 Reloads all cached configurations across all mods from disk.   |
+| `get(pluginId, fileName)`             | `Config<T>`                          | 🔍 Retrieves a cached configuration instance for the file.        |
+| `get(pluginId, fileName, type)`       | `Config<T>`                          | 🔎 Retrieves a cached instance and verifies its model type.       |
+| `resolvePath(pluginId, fileName)`     | `Path`                               | 📍 Returns the validated normalized file path on disk.            |
+| `saveAll()`                           | `void`                               | 💾 Persists all cached configurations; one failure does not stop the rest. |
+| `reloadAll()`                         | `void`                               | 🔄 Reloads all cached configurations; one failure does not stop the rest.  |
+| `unload(pluginData)`                  | `void`                               | 🧹 Removes all cached configurations of the plugin.               |
+| `unload(pluginId)`                    | `void`                               | 🧹 Removes all cached configurations of the plugin identifier.    |
+| `unloadAll()`                         | `void`                               | 🗑️ Clears the entire configuration cache.                         |
 
 ---
 
@@ -245,4 +244,6 @@ reload();
 | `save()`                     | `void`                       | 💾 Serializes and persists the current state to disk.              |
 | `reload()`                   | `void`                       | 🔄 Reloads from disk and refreshes the in-memory state.            |
 | `update(Consumer<T> action)` | `void`                       | ⚡ Applies a mutating action and immediately saves changes to disk. |
+| `updateAndGet(Function<T, T> action)` | `T`                  | 🔁 Replaces an immutable model and immediately saves changes to disk. |
+| `type()`                     | `Class<T>`                   | 🏷️ Returns the model type bound to the configuration file.         |
 | `getFile()`                  | `Path`                       | 📁 Returns the physical path to the configuration file.            |
