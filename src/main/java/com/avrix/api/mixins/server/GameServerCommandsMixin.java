@@ -1,6 +1,8 @@
 package com.avrix.api.mixins.server;
 
 import com.avrix.api.commands.CommandManager;
+import com.avrix.api.commands.CommandMessages;
+import com.avrix.api.commands.CommandSource;
 import net.lenni0451.classtransform.annotations.CTransformer;
 import net.lenni0451.classtransform.annotations.injection.COverride;
 import zombie.characters.Role;
@@ -31,7 +33,7 @@ public class GameServerCommandsMixin {
             return null;
         }
 
-        String avrixResult = CommandManager.handleCommand(input, connection);
+        String avrixResult = CommandManager.dispatchCommand(input, CommandSource.of(connection));
         if (avrixResult != null) {
             return avrixResult;
         }
@@ -46,27 +48,24 @@ public class GameServerCommandsMixin {
             }
         }
 
-        Class<?> cls = CommandBase.findCommandCls(input);
-        if (cls != null) {
-            Constructor<?> constructor = cls.getConstructors()[0];
-            try {
-                CommandBase command = (CommandBase) constructor.newInstance(adminUsername, accessLevel, input, connection);
-                return command.Execute();
-            } catch (IllegalAccessException e) {
-                DebugType.General.printException(e, "", LogSeverity.Error);
-                return "A IllegalAccessException error occured";
-            } catch (InstantiationException e2) {
-                DebugType.General.printException(e2, "", LogSeverity.Error);
-                return "A InstantiationException error occured";
-            } catch (InvocationTargetException e3) {
-                DebugType.General.printException(e3, "", LogSeverity.Error);
-                return "A InvocationTargetException error occured";
-            } catch (SQLException e4) {
-                DebugType.General.printException(e4, "", LogSeverity.Error);
-                return "A SQL error occured";
+        try {
+            Class<?> cls = CommandBase.findCommandCls(input);
+            if (cls == null) {
+                return "Unknown command " + input;
             }
-        }
 
-        return "Unknown command " + input;
+            Constructor<?> constructor = cls.getDeclaredConstructor(
+                    String.class, Role.class, String.class, UdpConnection.class
+            );
+            constructor.setAccessible(true);
+            CommandBase command = (CommandBase) constructor.newInstance(
+                    adminUsername, accessLevel, input, connection
+            );
+            return command.Execute();
+        } catch (NoSuchMethodException | IllegalAccessException | InstantiationException
+                 | InvocationTargetException | SQLException | RuntimeException ex) {
+            DebugType.General.printException(ex, "", LogSeverity.Error);
+            return CommandMessages.internalError("vanilla");
+        }
     }
 }

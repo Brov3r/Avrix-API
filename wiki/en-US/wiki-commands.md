@@ -2,16 +2,16 @@
 
 ## 💬 Chat / Console Commands
 
-The **Avrix** command framework provides a declarative API for creating server and in-game commands. It features
-automated quoted argument lexing, a hierarchical subcommand tree (`Subcommand`), independent execution cooldown timers (
-`Cooldowns`), type-safe argument access within `CommandContext`, and seamless integration with `PermissionsManager` and
-native Project Zomboid `Capability` flags.
+The **Avrix** command framework provides declarative command registration, aliases, subcommands, execution scopes,
+permissions, capabilities, cooldowns, command lifecycle events, and support for server or client command sources.
+
+Commands are notification-style actions: they run the logic from `execute(...)` and return a response string.
 
 ---
 
 ### Creating a Basic Command
 
-To create a command, implement the `Command` interface and annotate the class with `@CommandInfo`.
+Implement `Command` and annotate the class with `@CommandInfo`.
 
 ```java
 package com.example.plugin.commands;
@@ -20,51 +20,125 @@ import com.avrix.api.commands.Command;
 import com.avrix.api.commands.CommandContext;
 import com.avrix.api.commands.CommandInfo;
 import com.avrix.api.commands.CommandScope;
-import zombie.characters.IsoPlayer;
-
-import java.util.concurrent.TimeUnit;
 
 @CommandInfo(
         name = "heal",
         aliases = {"healme", "hp"},
-        description = "Restores full health to a target player or self",
-        usage = "/heal [\"player name\"]",
-        permission = {"avrix.commands.heal", "avrix.admin.*"},
+        description = "Restores health to the issuing player",
+        usage = "/heal",
+        permission = {"avrix.commands.heal"},
         cooldown = 10,
-        cooldownUnit = TimeUnit.SECONDS,
         scope = CommandScope.BOTH
 )
 public class HealCommand implements Command {
 
     @Override
     public String execute(CommandContext context) {
-        return "Successfully restored health for: " + target.getUsername();
+        if (!context.isPlayer()) {
+            return "This command requires a player.";
+        }
+
+        return "Healing " + context.senderName();
     }
 }
 ```
 
+The return value is sent back through the normal command response channel. Returning `null` uses the default
+`"Command executed successfully."` message.
+
 ---
 
-### Creating Hierarchical Subcommands
+### Registering and Unregistering Commands
 
-Commands can delegate execution to child subcommands by overriding `subcommands()`. Each subcommand can define its own
-permissions, native capabilities, and isolated cooldown rules.
+Use an owner token such as `PluginData` so every command belonging to the plugin can be removed at once.
 
 ```java
-package com.example.plugin.commands;
+public class ExamplePlugin implements Plugin {
 
-import com.avrix.api.commands.*;
-import zombie.characters.IsoPlayer;
+    private final HealCommand healCommand = new HealCommand();
+    private PluginData pluginData;
 
-import java.util.Map;
-import java.util.concurrent.TimeUnit;
+    @Override
+    public void onInitialize(PluginData pluginData) {
+        this.pluginData = pluginData;
+        CommandManager.register(pluginData, healCommand);
+    }
 
+    @Override
+    public void onShutdown() {
+        CommandManager.unregisterAll(pluginData);
+    }
+}
+```
+
+`CommandManager.unregister("heal")`, `CommandManager.unregister(command)` and the legacy
+`CommandManager.register(command)` are also available.
+
+Registration rules:
+
+- primary names and aliases are case-insensitive;
+- names and aliases containing whitespace are rejected;
+- a primary name cannot steal another command's alias;
+- alias conflicts are logged and the conflicting alias is skipped;
+- re-registering the same command class replaces the previous instance;
+- a vanilla Project Zomboid command cannot be replaced unless `overrideVanilla = true` is set.
+
+---
+
+### Command Sources and Client Commands
+
+`CommandSource` explicitly describes who issued a command:
+
+```java
+public enum Type {
+    PLAYER,  // in-game player on a server
+    CLIENT,  // local client-side player
+    CONSOLE, // server console/terminal
+    RCON     // remote console
+}
+```
+
+Dispatch with an explicit source:
+
+```java
+CommandManager.dispatchCommand("/heal", CommandSource.serverConsole());
+CommandManager.dispatchCommand("/heal", CommandSource.rcon());
+CommandManager.dispatchCommand("/heal", CommandSource.player(connection, player));
+```
+
+Client-side dispatch helper:
+
+```java
+String response = CommandManager.handleClientCommand("/heal", localPlayer);
+```
+
+The legacy server overload remains available:
+
+```java
+String response = CommandManager.handleCommand("/heal", connection);
+```
+
+Client command support is API-level: the plugin is responsible for calling `handleClientCommand` from its client UI,
+keybind, chat hook, or another client-side integration point. The built-in game mixin bridges only the server command
+pipeline.
+
+`CommandScope` rules:
+
+- `CHAT` allows `PLAYER` and `CLIENT`;
+- `CONSOLE` allows `CONSOLE` and `RCON`;
+- `BOTH` allows every source.
+
+---
+
+### Subcommands
+
+```java
 @CommandInfo(
         name = "kit",
         description = "Claim player item kits",
         usage = "/kit <starter|vip>",
         permission = {"kit.use"},
-        scope = CommandScope.CHAT
+        scope = CommandScope.BOTH
 )
 public class KitCommand implements Command {
 
@@ -78,7 +152,7 @@ public class KitCommand implements Command {
 
     @Override
     public String execute(CommandContext context) {
-        return "Available kits: starter, vip. Usage: /kit <name>";
+        return "Available kits: starter, vip";
     }
 
     private static class StarterKitSubcommand implements Subcommand {
@@ -127,136 +201,132 @@ public class KitCommand implements Command {
 }
 ```
 
----
-
-### `@CommandInfo` Annotation Parameters
-
-| Parameter      | Type           | Default             | Description                                                                                      |
-|:---------------|:---------------|:--------------------|:-------------------------------------------------------------------------------------------------|
-| `name`         | `String`       | *(Required)*        | Primary command trigger (without leading slash).                                                 |
-| `aliases`      | `String[]`     | `{}`                | Additional aliases and shortcuts for invoking the command.                                       |
-| `description`  | `String`       | `""`                | Human-readable description of the command purpose.                                               |
-| `usage`        | `String`       | `""`                | Syntax guide and expected parameter format.                                                      |
-| `permission`   | `String[]`     | `{}`                | Custom permission nodes. Access is granted if the issuer holds **at least one** node (OR logic). |
-| `capability`   | `Capability[]` | `{}`                | Native Project Zomboid capability flags required for execution.                                  |
-| `cooldown`     | `long`         | `0`                 | Cooldown duration between consecutive command executions by a player.                            |
-| `cooldownUnit` | `TimeUnit`     | `TimeUnit.SECONDS`  | Time unit for the `cooldown` parameter.                                                          |
-| `scope`        | `CommandScope` | `CommandScope.BOTH` | Allowed execution environment: chat only (`CHAT`), console only (`CONSOLE`), or both (`BOTH`).   |
+Subcommand names are normalized to lowercase. Subcommands are snapshotted when the parent command is registered, so
+return an immutable map and avoid changing it at runtime.
 
 ---
 
-### Execution Scope (`CommandScope`)
+### `@CommandInfo` Parameters
 
-The `CommandScope` enum isolates invocation based on the sender's environment:
-
-```java
-public enum CommandScope {
-    CHAT,    // Executable ONLY by an active in-game player via chat
-    CONSOLE, // Executable ONLY by an administrator from the server terminal or RCON
-    BOTH     // Accessible from both player chat and server console
-}
-```
-
-- If the server console attempts to invoke a command with `scope = CommandScope.CHAT`, the engine returns:  
-  `"This command can only be executed in-game by a player."`
-- If an in-game player attempts to invoke a command with `scope = CommandScope.CONSOLE`, the engine returns:  
-  `"This command can only be executed from the server console."`
+| Parameter          | Type           | Default             | Description                                                                  |
+|:-------------------|:---------------|:--------------------|:-----------------------------------------------------------------------------|
+| `name`             | `String`       | *(Required)*        | Primary command trigger without a leading slash.                             |
+| `aliases`          | `String[]`     | `{}`                | Alternative triggers.                                                       |
+| `description`      | `String`       | `""`                | Human-readable description for help/UI.                                     |
+| `usage`            | `String`       | `""`                | Syntax guide.                                                               |
+| `permission`       | `String[]`     | `{}`                | Custom permission nodes. Access is granted if at least one matches.          |
+| `capability`       | `Capability[]` | `{}`                | Native Project Zomboid capabilities. Access is granted if at least one matches. |
+| `scope`            | `CommandScope` | `CommandScope.BOTH` | Allowed source types.                                                       |
+| `cooldown`         | `long`         | `0`                 | Cooldown duration for player sources.                                       |
+| `cooldownUnit`     | `TimeUnit`     | `TimeUnit.SECONDS`  | Cooldown time unit.                                                         |
+| `overrideVanilla`  | `boolean`      | `false`             | Allows replacing a vanilla PZ command with the same primary name or alias.   |
 
 ---
 
-### Command Context (`CommandContext`)
+### Permissions and Cooldowns
 
-When `execute` is called, an immutable `CommandContext` object is supplied, providing type-safe parsing helpers and
-eliminating boilerplate exception handling:
+1. **Console and RCON** bypass permission checks and cooldowns.
+2. **OR logic** applies inside `permission` and `capability`.
+3. **AND logic** applies between the root command and a selected subcommand.
+4. Cooldowns are tracked per source identity and per command/subcommand path.
+5. Cooldown checks are atomic and expired entries are pruned periodically.
+
+---
+
+### Command Context
+
+`CommandContext` is immutable. The `args()` accessor returns a defensive copy.
 
 ```java
 public record CommandContext(
-        String senderName,        // Sender display name (player username or "ServerConsole")
-        IsoPlayer player,         // IsoPlayer instance (or null for server console)
-        UdpConnection connection, // Client network UDP connection (or null for console)
-        String rawCommand,        // Full raw unparsed command string
-        String[] args             // Clean tokenized arguments (quotes stripped)
+        String senderName,
+        CommandSource source,
+        IsoPlayer player,
+        UdpConnection connection,
+        String rawCommand,
+        String[] args
 ) {
-    public boolean isPlayer();                             // true if issued by an active player
-
-    public Optional<IsoPlayer> getPlayer();                // Safe optional accessor for the sender entity
-
-    public int length();                                   // Total argument count
-
-    public Optional<String> getArg(int index);             // Retrieves argument wrapped in Optional
-
-    public String getString(int index, String fallback);   // String argument with default fallback
-
-    public Optional<Integer> getInt(int index);            // Integer parsing
-
-    public int getInt(int index, int fallback);            // Integer parsing with default fallback
-
-    public Optional<Double> getDouble(int index);          // Double parsing
-
-    public double getDouble(int index, double fallback);   // Double parsing with default fallback
-
-    public Optional<Boolean> getBoolean(int index);        // Boolean parsing (true/false, 1/0, yes/no)
-
-    public boolean getBoolean(int index, boolean fallback);// Boolean parsing with default fallback
-
-    public String joinArgs(int startIndex);                // Joins all remaining arguments with single spaces
-
-    public CommandContext subContext(int shift);           // Creates child context with shifted arguments
+    boolean isPlayer();
+    Optional<IsoPlayer> getPlayer();
+    int length();
+    Optional<String> getArg(int index);
+    String getString(int index, String fallback);
+    Optional<Integer> getInt(int index);
+    int getInt(int index, int fallback);
+    Optional<Double> getDouble(int index);
+    double getDouble(int index, double fallback);
+    Optional<Boolean> getBoolean(int index);
+    boolean getBoolean(int index, boolean fallback);
+    String joinArgs(int startIndex);
+    CommandContext subContext(int shift);
 }
 ```
 
----
-
-### Quoted String Lexing
-
-The built-in `CommandArgumentParser` automatically groups multi-word strings enclosed in single (`''`) or double (`""`)
-quotes into a single argument token and strips external quote wrappers:
-
-| Input Command                           | `context.args()[0]` | `context.args()[1]` | `context.args()[2]` |
-|:----------------------------------------|:--------------------|:--------------------|:--------------------|
-| `/heal "Miss Bekket"`                   | `Miss Bekket`       | *(absent)*          | *(absent)*          |
-| `/tp 'John Doe' "Safe Zone 1"`          | `John Doe`          | `Safe Zone 1`       | *(absent)*          |
-| `/give Brov3r Base.Axe 2`               | `Brov3r`            | `Base.Axe`          | `2`                 |
-| `/warn "Bad Player" 3 "Griefing walls"` | `Bad Player`        | `3`                 | `Griefing walls`    |
+The legacy five-argument constructor remains available and infers a `CommandSource` from the player/connection.
 
 ---
 
-### Permissions and Cooldown Rules
+### Quoted and Escaped Arguments
 
-1. **Console Priority:** The server console always maintains root access, bypassing all permission constraints and
-   ignoring cooldown timers.
-2. **Permission Evaluation (OR Logic):** Access is granted if the issuer possesses at least one configured string
-   permission node (`permission`) or native capability (`capability`).
-3. **Subcommand Hierarchy (AND Logic):** To execute `/kit starter`, a player must possess both the root command
-   permission (`kit.use`) **and** the specific subcommand permission (`kit.starter`).
-4. **Cooldown Isolation:** Cooldown timers are tracked per-player and stored independently for root commands and
-   distinct subcommands.
+`CommandArgumentParser` supports single quotes, double quotes, and backslash escaping.
+
+| Input command                              | `args()[0]`    | `args()[1]`    |
+|:-------------------------------------------|:---------------|:---------------|
+| `/heal "Miss Bekket"`                      | `Miss Bekket`  | *(absent)*     |
+| `/tp 'John Doe' "Safe Zone 1"`             | `John Doe`     | `Safe Zone 1`  |
+| `/heal "Player \"One\""`                   | `Player "One"` | *(absent)*     |
+| `/give Brov3r Base.Axe 2`                  | `Brov3r`       | `Base.Axe`     |
+
+Unclosed quotes are rejected with an invalid-syntax response instead of producing malformed tokens.
 
 ---
 
-### Registering and Unregistering Commands
-
-Register commands via the static `CommandManager` during plugin initialization:
+### Command Descriptors and Help
 
 ```java
-package com.example.plugin;
+Map<String, CommandDescriptor> descriptors = CommandManager.getDescriptors();
+Map<String, Command> primaryCommands = CommandManager.getPrimaryCommands();
 
-import com.avrix.api.commands.CommandManager;
-import com.avrix.plugins.Plugin;
-import com.avrix.plugins.PluginData;
-import com.example.plugin.commands.HealCommand;
-import com.example.plugin.commands.KitCommand;
-
-public class ExamplePlugin implements Plugin {
-
-    @Override
-    public void onInitialize(PluginData pluginData) {
-        // Register command instances
-        CommandManager.register(new HealCommand());
-        CommandManager.register(new KitCommand());
-
-        // Unregister command when plugin unloads or reloads
-        // CommandManager.unregister("heal");
-    }
+CommandDescriptor heal = CommandManager.getDescriptor("heal");
+if (heal != null) {
+    System.out.println(heal.name());
+    System.out.println(heal.aliases());
+    System.out.println(heal.description());
+    System.out.println(heal.usage());
+    System.out.println(heal.scope());
+    System.out.println(heal.subcommands());
 }
 ```
+
+`getCommands()` still returns the legacy alias-inclusive map.
+
+---
+
+### Command Events
+
+Command lifecycle and execution events use the Avrix event bus:
+
+| Event                              | Parameters                                              | Description                                      |
+|:-----------------------------------|:--------------------------------------------------------|:-------------------------------------------------|
+| `ServerEvents.COMMAND_REGISTERED`   | `CommandDescriptor descriptor`                           | Command successfully registered                  |
+| `ServerEvents.COMMAND_UNREGISTERED` | `CommandDescriptor descriptor`                           | Command removed                                  |
+| `ServerEvents.COMMAND_EXECUTE`      | `CommandContext context, String commandPath`             | Before command/subcommand execution              |
+| `ServerEvents.COMMAND_SUCCESS`      | `CommandContext context, String commandPath, String result, long elapsedMs` | After successful execution |
+| `ServerEvents.COMMAND_FAILURE`      | `CommandContext context, String commandPath, String reason, Throwable error` | Validation failure or exception |
+
+```java
+@SubscribeEvent(custom = "OnCommandRegistered")
+public void onCommandRegistered(CommandDescriptor descriptor) {
+    System.out.println("Registered: " + descriptor.name());
+}
+```
+
+Command registration/unregistration events are also delivered for client-side commands registered through the API.
+
+---
+
+### Messages and Error Handling
+
+Validation messages are resolved through `CommandMessages` using Project Zomboid translation keys with English
+fallbacks. Exception details are never returned to the sender; the response contains a short correlation id while the
+full stack trace is written to the server log.

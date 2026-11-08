@@ -27,9 +27,32 @@ public enum CommandScope {
      * @return {@code true} if allowed
      */
     public boolean allows(boolean isPlayerOrigin) {
+        return allows(isPlayerOrigin ? CommandSource.Type.PLAYER : CommandSource.Type.CONSOLE);
+    }
+
+    /**
+     * Validates whether the given command source satisfies this scope.
+     *
+     * @param source command source
+     * @return {@code true} if allowed
+     */
+    public boolean allows(CommandSource source) {
+        return source != null && allows(source.type());
+    }
+
+    /**
+     * Validates whether the given source type satisfies this scope.
+     *
+     * @param sourceType command source type
+     * @return {@code true} if allowed
+     */
+    public boolean allows(CommandSource.Type sourceType) {
+        if (sourceType == null) {
+            return false;
+        }
         return switch (this) {
-            case CHAT -> isPlayerOrigin;
-            case CONSOLE -> !isPlayerOrigin;
+            case CHAT -> sourceType == CommandSource.Type.PLAYER || sourceType == CommandSource.Type.CLIENT;
+            case CONSOLE -> sourceType == CommandSource.Type.CONSOLE || sourceType == CommandSource.Type.RCON;
             case BOTH -> true;
         };
     }

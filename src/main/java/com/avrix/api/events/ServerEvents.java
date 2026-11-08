@@ -78,6 +78,24 @@ public enum ServerEvents implements Event {
     PERMISSION_REVOKED("OnPermissionRevoked"),
 
     /**
+     * Triggered after a command has been registered in the Avrix command registry.
+     * <p><b>Parameters:</b></p>
+     * <ul>
+     *   <li>{@code CommandDescriptor descriptor} — public command description.</li>
+     * </ul>
+     */
+    COMMAND_REGISTERED("OnCommandRegistered"),
+
+    /**
+     * Triggered after a command has been removed from the Avrix command registry.
+     * <p><b>Parameters:</b></p>
+     * <ul>
+     *   <li>{@code CommandDescriptor descriptor} — public command description.</li>
+     * </ul>
+     */
+    COMMAND_UNREGISTERED("OnCommandUnregistered"),
+
+    /**
      * Triggered immediately before an authorized command or subcommand is executed.
      * <p><b>Parameters:</b></p>
      * <ul>

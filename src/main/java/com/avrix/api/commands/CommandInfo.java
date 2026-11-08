@@ -9,6 +9,7 @@ import java.util.concurrent.TimeUnit;
  * Declares command metadata, triggers, usage syntax, execution scope, cooldowns, and authorization rules.
  */
 @Documented
+@Inherited
 @Target(ElementType.TYPE)
 @Retention(RetentionPolicy.RUNTIME)
 public @interface CommandInfo {
@@ -75,4 +76,14 @@ public @interface CommandInfo {
      * @return time unit (defaults to SECONDS)
      */
     TimeUnit cooldownUnit() default TimeUnit.SECONDS;
+
+    /**
+     * Allows this command to replace an existing Project Zomboid command with the same name.
+     * <p>
+     * If {@code false}, registration is rejected when the primary name or an alias conflicts
+     * with a vanilla game command.
+     *
+     * @return {@code true} to allow replacing a vanilla command
+     */
+    boolean overrideVanilla() default false;
 }

@@ -10,33 +10,59 @@ import java.util.Optional;
 /**
  * Immutable context provided to a command during execution.
  *
- * @param senderName the name of the sender (player username or "Server")
+ * @param senderName the name of the sender (player username or "ServerConsole")
+ * @param source     command source descriptor
  * @param player     the player instance (or {@code null} if executed from server console/RCON)
- * @param connection the UDP network connection (or {@code null} if console)
+ * @param connection the UDP network connection (or {@code null} if console/client)
  * @param rawCommand the raw command input string
  * @param args       parsed positional arguments (quotes stripped)
  */
 public record CommandContext(
         String senderName,
+        CommandSource source,
         IsoPlayer player,
         UdpConnection connection,
         String rawCommand,
         String[] args
 ) {
 
+    /**
+     * Creates a context for legacy callers that do not provide an explicit command source.
+     *
+     * @param senderName sender name
+     * @param player     player instance or {@code null}
+     * @param connection connection or {@code null}
+     * @param rawCommand raw command input
+     * @param args       parsed positional arguments
+     */
+    public CommandContext(String senderName, IsoPlayer player, UdpConnection connection, String rawCommand, String[] args) {
+        this(senderName, CommandSource.fromLegacy(player, connection), player, connection, rawCommand, args);
+    }
+
     public CommandContext {
         Objects.requireNonNull(senderName, "Sender name cannot be null");
+        Objects.requireNonNull(source, "Command source cannot be null");
         Objects.requireNonNull(rawCommand, "Raw command cannot be null");
-        args = (args != null) ? args : new String[0];
+        args = (args != null) ? args.clone() : new String[0];
     }
 
     /**
-     * Checks if this command was executed by an in-game player.
+     * Returns a defensive copy of the parsed positional arguments.
+     *
+     * @return argument array copy
+     */
+    @Override
+    public String[] args() {
+        return args.clone();
+    }
+
+    /**
+     * Checks if this command was executed by an in-game or client player.
      *
      * @return {@code true} if sent by an active player
      */
     public boolean isPlayer() {
-        return player != null;
+        return source.isPlayer();
     }
 
     /**
@@ -189,9 +215,9 @@ public record CommandContext(
             return this;
         }
         if (shift >= args.length) {
-            return new CommandContext(senderName, player, connection, rawCommand, new String[0]);
+            return new CommandContext(senderName, source, player, connection, rawCommand, new String[0]);
         }
         String[] shiftedArgs = Arrays.copyOfRange(args, shift, args.length);
-        return new CommandContext(senderName, player, connection, rawCommand, shiftedArgs);
+        return new CommandContext(senderName, source, player, connection, rawCommand, shiftedArgs);
     }
 }

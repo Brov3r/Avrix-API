@@ -472,7 +472,8 @@ class CommandManagerTest {
 
             String result = CommandManager.handleCommand("/erroneous", null);
 
-            assertThat(result).contains("An internal error occurred during execution: Simulated command crash");
+            assertThat(result).contains("An internal error occurred during command execution")
+                    .contains("id:");
         }
     }
 
@@ -555,7 +556,8 @@ class CommandManagerTest {
             CommandManager.register(new CrashingSubcommandRoot());
 
             String result = CommandManager.handleCommand("/errsubcmd crash", null);
-            assertThat(result).contains("An internal error occurred during execution: Subcommand boom!");
+            assertThat(result).contains("An internal error occurred during command execution")
+                    .contains("id:");
         }
 
         @Test

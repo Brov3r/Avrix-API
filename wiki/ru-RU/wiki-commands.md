@@ -1,17 +1,17 @@
-[Главная](../wiki-language.md) > [Документация](wiki-main.md) > Чат/консоль команды
+[Главная](../wiki-language.md) > [Документация](wiki-main.md) > Команды чата и консоли
 
-## 💬 Чат/консоль команды
+## 💬 Команды чата и консоли
 
-Система команд **Avrix** предоставляет декларативный API для создания серверных и внутриигровых команд. Она включает
-автоматический лексический анализ аргументов с поддержкой кавычек, дерево подкоманд (`Subcommand`), независимые таймеры
-перезарядки (`Cooldowns`), типобезопасный доступ к аргументам в `CommandContext`, а также бесшовную интеграцию с
-`PermissionsManager` и нативными `Capability` Project Zomboid.
+Фреймворк команд **Avrix** предоставляет декларативную регистрацию, алиасы, subcommand'ы, области выполнения,
+permissions, capabilities, cooldown'ы, события жизненного цикла команд и поддержку серверных и клиентских источников.
+
+Команды выполняют логику из `execute(...)` и возвращают строку ответа.
 
 ---
 
 ### Создание базовой команды
 
-Для создания команды реализуйте интерфейс `Command` и добавьте аннотацию `@CommandInfo`.
+Реализуйте `Command` и добавьте аннотацию `@CommandInfo`.
 
 ```java
 package com.example.plugin.commands;
@@ -20,52 +20,124 @@ import com.avrix.api.commands.Command;
 import com.avrix.api.commands.CommandContext;
 import com.avrix.api.commands.CommandInfo;
 import com.avrix.api.commands.CommandScope;
-import zombie.characters.IsoPlayer;
-
-import java.util.concurrent.TimeUnit;
 
 @CommandInfo(
         name = "heal",
         aliases = {"healme", "hp"},
-        description = "Полностью восстанавливает здоровье игрока",
-        usage = "/heal [\"имя игрока\"]",
-        permission = {"avrix.commands.heal", "avrix.admin.*"},
+        description = "Восстанавливает здоровье отправителю",
+        usage = "/heal",
+        permission = {"avrix.commands.heal"},
         cooldown = 10,
-        cooldownUnit = TimeUnit.SECONDS,
         scope = CommandScope.BOTH
 )
 public class HealCommand implements Command {
 
     @Override
     public String execute(CommandContext context) {
-        // Реализация команды ...
-        return "Здоровье игрока " + target.getUsername() + " успешно восстановлено!";
+        if (!context.isPlayer()) {
+            return "Команда требует игрока.";
+        }
+
+        return "Лечение: " + context.senderName();
     }
 }
 ```
 
+Возвращённая строка отправляется обычному каналу ответа команды. При возврате `null` используется сообщение
+`"Command executed successfully."`.
+
 ---
 
-### Создание иерархических подкоманд
+### Регистрация и отмена регистрации
 
-Команды могут делегировать выполнение дочерним подкомандам через метод `subcommands()`. Каждая подкоманда способна
-определять собственные права доступа, нативные `Capability` и индивидуальные кулдауны.
+Используйте owner-токен, например `PluginData`, чтобы удалить все команды плагина одной операцией.
 
 ```java
-package com.example.plugin.commands;
+public class ExamplePlugin implements Plugin {
 
-import com.avrix.api.commands.*;
-import zombie.characters.IsoPlayer;
+    private final HealCommand healCommand = new HealCommand();
+    private PluginData pluginData;
 
-import java.util.Map;
-import java.util.concurrent.TimeUnit;
+    @Override
+    public void onInitialize(PluginData pluginData) {
+        this.pluginData = pluginData;
+        CommandManager.register(pluginData, healCommand);
+    }
 
+    @Override
+    public void onShutdown() {
+        CommandManager.unregisterAll(pluginData);
+    }
+}
+```
+
+Также доступны `CommandManager.unregister("heal")`, `CommandManager.unregister(command)` и legacy-метод
+`CommandManager.register(command)`.
+
+Правила регистрации:
+
+- имена и алиасы нечувствительны к регистру;
+- имена с пробелами отклоняются;
+- primary-имя не может забрать алиас другой команды;
+- конфликтующие алиасы логируются и пропускаются;
+- повторная регистрация команды того же класса заменяет предыдущий экземпляр;
+- ванильную команду PZ нельзя заменить без `overrideVanilla = true`.
+
+---
+
+### Источники команд и клиентские команды
+
+`CommandSource` явно описывает источник:
+
+```java
+public enum Type {
+    PLAYER,  // игрок на сервере
+    CLIENT,  // локальный клиентский игрок
+    CONSOLE, // серверная консоль/терминал
+    RCON     // удалённая консоль
+}
+```
+
+Вызов с явным источником:
+
+```java
+CommandManager.dispatchCommand("/heal", CommandSource.serverConsole());
+CommandManager.dispatchCommand("/heal", CommandSource.rcon());
+CommandManager.dispatchCommand("/heal", CommandSource.player(connection, player));
+```
+
+Клиентский helper:
+
+```java
+String response = CommandManager.handleClientCommand("/heal", localPlayer);
+```
+
+Legacy-серверный вызов сохранён:
+
+```java
+String response = CommandManager.handleCommand("/heal", connection);
+```
+
+Поддержка клиентских команд — API-уровня: плагин сам вызывает `handleClientCommand` из клиентского UI, keybind,
+чата или другого клиентского хука. Встроенный игровой mixin покрывает только серверный пайплайн.
+
+Правила `CommandScope`:
+
+- `CHAT` разрешает `PLAYER` и `CLIENT`;
+- `CONSOLE` разрешает `CONSOLE` и `RCON`;
+- `BOTH` разрешает все источники.
+
+---
+
+### Subcommand'ы
+
+```java
 @CommandInfo(
         name = "kit",
         description = "Получение наборов предметов",
         usage = "/kit <starter|vip>",
         permission = {"kit.use"},
-        scope = CommandScope.CHAT
+        scope = CommandScope.BOTH
 )
 public class KitCommand implements Command {
 
@@ -79,7 +151,7 @@ public class KitCommand implements Command {
 
     @Override
     public String execute(CommandContext context) {
-        return "Доступные наборы: starter, vip. Использование: /kit <название>";
+        return "Доступные наборы: starter, vip";
     }
 
     private static class StarterKitSubcommand implements Subcommand {
@@ -100,7 +172,7 @@ public class KitCommand implements Command {
 
         @Override
         public String execute(CommandContext context) {
-            return "Стартовый набор успешно получен!";
+            return "Стартовый набор получен!";
         }
     }
 
@@ -122,142 +194,138 @@ public class KitCommand implements Command {
 
         @Override
         public String execute(CommandContext context) {
-            return "VIP набор успешно получен!";
+            return "VIP-набор получен!";
         }
     }
 }
 ```
 
----
-
-### Параметры аннотации `@CommandInfo`
-
-| Параметр       | Тип            | По умолчанию        | Описание                                                                                             |
-|:---------------|:---------------|:--------------------|:-----------------------------------------------------------------------------------------------------|
-| `name`         | `String`       | *(Обязательно)*     | Основной триггер вызова команды (без начального слэша).                                              |
-| `aliases`      | `String[]`     | `{}`                | Дополнительные синонимы и сокращения для вызова команды.                                             |
-| `description`  | `String`       | `""`                | Человекочитаемое описание назначения команды.                                                        |
-| `usage`        | `String`       | `""`                | Подсказка по синтаксису и ожидаемым параметрам.                                                      |
-| `permission`   | `String[]`     | `{}`                | Строковые узлы прав (`permissions`). Доступ разрешен, если у отправителя есть **хотя бы один** узел. |
-| `capability`   | `Capability[]` | `{}`                | Нативные capabilities Project Zomboid, необходимые для выполнения.                                   |
-| `cooldown`     | `long`         | `0`                 | Длительность задержки между повторными вызовами команды игроком.                                     |
-| `cooldownUnit` | `TimeUnit`     | `TimeUnit.SECONDS`  | Единица времени для параметра `cooldown`.                                                            |
-| `scope`        | `CommandScope` | `CommandScope.BOTH` | Область допустимого исполнения: только чат (`CHAT`), только консоль (`CONSOLE`) или везде (`BOTH`).  |
+Имена subcommand'ов нормализуются в lowercase. Snapshot subcommand'ов делается при регистрации родительской команды,
+поэтому возвращайте immutable map и не меняйте её во время работы.
 
 ---
 
-### Области выполнения (`CommandScope`)
+### Параметры `@CommandInfo`
 
-Перечисление `CommandScope` жестко изолирует вызовы в зависимости от среды отправителя:
-
-```java
-public enum CommandScope {
-    CHAT,    // Выполняется ТОЛЬКО живым игроком из игрового чата
-    CONSOLE, // Выполняется ТОЛЬКО администратором из терминала/RCON сервера
-    BOTH     // Доступно как в чате, так и в консоли сервера
-}
-```
-
-- Если консоль попытается вызвать команду со `scope = CommandScope.CHAT`, система вернет:  
-  `"This command can only be executed in-game by a player."`
-- Если игрок попытается вызвать команду со `scope = CommandScope.CONSOLE`, система вернет:  
-  `"This command can only be executed from the server console."`
+| Параметр          | Тип            | По умолчанию        | Описание                                                                 |
+|:------------------|:---------------|:--------------------|:-------------------------------------------------------------------------|
+| `name`            | `String`       | *(обязательно)*     | Основной триггер команды без ведущего slash.                             |
+| `aliases`         | `String[]`     | `{}`                | Альтернативные триггеры.                                                 |
+| `description`     | `String`       | `""`                | Описание для help/UI.                                                    |
+| `usage`           | `String`       | `""`                | Подсказка по синтаксису.                                                 |
+| `permission`      | `String[]`     | `{}`                | Пользовательские permission-ноды. Достаточно совпадения одной.            |
+| `capability`      | `Capability[]` | `{}`                | Нативные capabilities PZ. Достаточно одной.                              |
+| `scope`           | `CommandScope` | `CommandScope.BOTH` | Разрешённые источники.                                                   |
+| `cooldown`        | `long`         | `0`                 | Cooldown для игровых источников.                                         |
+| `cooldownUnit`    | `TimeUnit`     | `TimeUnit.SECONDS`  | Единица cooldown'а.                                                      |
+| `overrideVanilla` | `boolean`      | `false`             | Разрешает замену ванильной команды PZ с таким же именем или алиасом.     |
 
 ---
 
-### Контекст команды (`CommandContext`)
+### Права и cooldown
 
-При вызове метода `execute` передается неизменяемый объект `CommandContext`, предоставляющий типобезопасные методы
-извлечения параметров без необходимости ручной обработки исключений:
+1. **Консоль и RCON** обходят проверку прав и cooldown.
+2. **OR-логика** внутри `permission` и `capability`.
+3. **AND-логика** между родительской командой и выбранным subcommand'ом.
+4. Cooldown'ы учитываются по identity источника и пути команды/subcommand'а.
+5. Проверка cooldown атомарна, просроченные записи периодически очищаются.
+
+---
+
+### CommandContext
+
+`CommandContext` immutable. Аксессор `args()` возвращает защищённую копию.
 
 ```java
 public record CommandContext(
-        String senderName,        // Имя отправителя (ник игрока или "ServerConsole")
-        IsoPlayer player,         // Объект игрока IsoPlayer (или null для консоли)
-        UdpConnection connection, // Сетевой UDP-сокет (или null для консоли)
-        String rawCommand,        // Исходная строка ввода целиком
-        String[] args             // Массив очищенных аргументов (кавычки удалены)
+        String senderName,
+        CommandSource source,
+        IsoPlayer player,
+        UdpConnection connection,
+        String rawCommand,
+        String[] args
 ) {
-    public boolean isPlayer();                             // true, если команда вызвана онлайн-игроком
-
-    public Optional<IsoPlayer> getPlayer();                // Безопасное получение сущности отправителя
-
-    public int length();                                   // Количество переданных аргументов
-
-    public Optional<String> getArg(int index);             // Получение аргумента в Optional
-
-    public String getString(int index, String fallback);   // Строка с дефолтным значением
-
-    public Optional<Integer> getInt(int index);            // Парсинг integer
-
-    public int getInt(int index, int fallback);            // Парсинг integer с дефолтным значением
-
-    public Optional<Double> getDouble(int index);          // Парсинг double
-
-    public double getDouble(int index, double fallback);   // Парсинг double с дефолтным значением
-
-    public Optional<Boolean> getBoolean(int index);        // Парсинг boolean (true/false, 1/0, yes/no)
-
-    public boolean getBoolean(int index, boolean fallback);// Парсинг boolean с дефолтным значением
-
-    public String joinArgs(int startIndex);                // Склейка всех оставшихся аргументов через пробел
-
-    public CommandContext subContext(int shift);           // Создание дочернего контекста со сдвигом аргументов
+    boolean isPlayer();
+    Optional<IsoPlayer> getPlayer();
+    int length();
+    Optional<String> getArg(int index);
+    String getString(int index, String fallback);
+    Optional<Integer> getInt(int index);
+    int getInt(int index, int fallback);
+    Optional<Double> getDouble(int index);
+    double getDouble(int index, double fallback);
+    Optional<Boolean> getBoolean(int index);
+    boolean getBoolean(int index, boolean fallback);
+    String joinArgs(int startIndex);
+    CommandContext subContext(int shift);
 }
 ```
 
----
-
-### Парсер многословных аргументов и кавычек
-
-Встроенный лексер `CommandArgumentParser` автоматически объединяет слова в кавычках (`""` или `''`) в единый аргумент и
-очищает их от внешних символов обрамления:
-
-| Введенная команда                       | `context.args()[0]` | `context.args()[1]` | `context.args()[2]` |
-|:----------------------------------------|:--------------------|:--------------------|:--------------------|
-| `/heal "Miss Bekket"`                   | `Miss Bekket`       | *(отсутствует)*     | *(отсутствует)*     |
-| `/tp 'John Doe' "Safe Zone 1"`          | `John Doe`          | `Safe Zone 1`       | *(отсутствует)*     |
-| `/give Brov3r Base.Axe 2`               | `Brov3r`            | `Base.Axe`          | `2`                 |
-| `/warn "Bad Player" 3 "Griefing walls"` | `Bad Player`        | `3`                 | `Griefing walls`    |
+Legacy-конструктор с пятью аргументами сохранён и сам выводит `CommandSource` из player/connection.
 
 ---
 
-### Проверка прав и кулдауны
+### Кавычки и экранирование
 
-1. **Приоритет консоли:** Серверная консоль всегда обладает root-доступом, обходит любые ограничения прав и игнорирует
-   кулдауны.
-2. **Проверка прав (OR-логика):** Доступ разрешен, если игрок обладает хотя бы одним строковым правом (`permission`) или
-   нативным свойством (`capability`).
-3. **Иерархия подкоманд (AND-логика):** Для вызова `/kit starter` игрок обязан обладать как правом корневой команды (
-   `kit.use`), так и правом конкретной ветки (`kit.starter`).
-4. **Изоляция кулдаунов:** Таймеры перезарядки вычисляются раздельно для каждого игрока и сохраняются независимо для
-   корневых команд и каждой отдельной подкоманды.
+`CommandArgumentParser` поддерживает одинарные, двойные кавычки и backslash-экранирование.
+
+| Ввод                                      | `args()[0]`    | `args()[1]`    |
+|:------------------------------------------|:---------------|:---------------|
+| `/heal "Miss Bekket"`                     | `Miss Bekket`  | *(нет)*        |
+| `/tp 'John Doe' "Safe Zone 1"`            | `John Doe`     | `Safe Zone 1`  |
+| `/heal "Player \"One\""`                  | `Player "One"` | *(нет)*        |
+| `/give Brov3r Base.Axe 2`                 | `Brov3r`       | `Base.Axe`     |
+
+Незакрытые кавычки отклоняются с ответом invalid-syntax, а не превращаются в мусорные токены.
 
 ---
 
-### Регистрация и удаление команд
-
-Регистрация выполняется через статический класс `CommandManager` в точке инициализации плагина:
+### Дескрипторы и help
 
 ```java
-package com.example.plugin;
+Map<String, CommandDescriptor> descriptors = CommandManager.getDescriptors();
+Map<String, Command> primaryCommands = CommandManager.getPrimaryCommands();
 
-import com.avrix.api.commands.CommandManager;
-import com.avrix.plugins.Plugin;
-import com.avrix.plugins.PluginData;
-import com.example.plugin.commands.HealCommand;
-import com.example.plugin.commands.KitCommand;
-
-public class ExamplePlugin implements Plugin {
-
-    @Override
-    public void onInitialize(PluginData pluginData) {
-        // Регистрация команд
-        CommandManager.register(new HealCommand());
-        CommandManager.register(new KitCommand());
-
-        // Отмена регистрации команды при выгрузке/перезагрузке
-        // CommandManager.unregister("heal");
-    }
+CommandDescriptor heal = CommandManager.getDescriptor("heal");
+if (heal != null) {
+    System.out.println(heal.name());
+    System.out.println(heal.aliases());
+    System.out.println(heal.description());
+    System.out.println(heal.usage());
+    System.out.println(heal.scope());
+    System.out.println(heal.subcommands());
 }
 ```
+
+`getCommands()` по-прежнему возвращает legacy-map с алиасами.
+
+---
+
+### События команд
+
+Жизненный цикл и выполнение команд используют event bus Avrix:
+
+| Событие                            | Параметры                                               | Описание                                      |
+|:-----------------------------------|:--------------------------------------------------------|:----------------------------------------------|
+| `ServerEvents.COMMAND_REGISTERED`   | `CommandDescriptor descriptor`                          | Команда успешно зарегистрирована              |
+| `ServerEvents.COMMAND_UNREGISTERED` | `CommandDescriptor descriptor`                          | Команда удалена                               |
+| `ServerEvents.COMMAND_EXECUTE`      | `CommandContext context, String commandPath`            | Перед выполнением команды/subcommand'а        |
+| `ServerEvents.COMMAND_SUCCESS`      | `CommandContext context, String commandPath, String result, long elapsedMs` | После успешного выполнения |
+| `ServerEvents.COMMAND_FAILURE`      | `CommandContext context, String commandPath, String reason, Throwable error` | Ошибка валидации или исключение |
+
+```java
+@SubscribeEvent(custom = "OnCommandRegistered")
+public void onCommandRegistered(CommandDescriptor descriptor) {
+    System.out.println("Зарегистрирована: " + descriptor.name());
+}
+```
+
+События регистрации/удаления также приходят для клиентских команд, зарегистрированных через API.
+
+---
+
+### Сообщения и ошибки
+
+Сообщения валидации проходят через `CommandMessages`: сначала ищется translation key Project Zomboid, затем
+используется английский fallback. Детали исключения не отправляются игроку: в ответе только короткий correlation id,
+а полный stack trace пишется в лог сервера.
