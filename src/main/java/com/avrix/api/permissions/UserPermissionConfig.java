@@ -13,8 +13,10 @@ import java.util.Map;
  * Declarative configuration model representing personal permission and role overrides for an individual player.
  *
  * @param group                primary group/role explicitly assigned to this user
- * @param permissions          list of permanent permission nodes assigned directly to this user (supports {@code "-node"} negation)
- * @param temporaryPermissions map of permission nodes to their ISO-8601 expiration timestamps (e.g., {@code "2026-12-31T23:59:59Z"})
+ * @param permissions          list of permanent permission nodes assigned directly to this user
+ *                             (supports {@code "-node"} negation)
+ * @param temporaryPermissions map of permission nodes to their ISO-8601 expiration timestamps
+ *                             (e.g., {@code "2026-12-31T23:59:59Z"})
  * @param prefix               personal visual chat prefix overriding group defaults
  * @param suffix               personal visual chat suffix overriding group defaults
  */
@@ -26,7 +28,8 @@ public record UserPermissionConfig(
         @Comment("List of permanent permission nodes assigned directly to this user")
         List<String> permissions,
 
-        @Comment("Map of temporary permission nodes to their ISO-8601 expiration timestamps (e.g. '2026-12-31T23:59:59Z')")
+        @Comment("Map of temporary permission nodes to their ISO-8601 expiration timestamps "
+                + "(e.g. '2026-12-31T23:59:59Z')")
         Map<String, String> temporaryPermissions,
 
         @Comment("Personal visual chat prefix overriding group defaults")

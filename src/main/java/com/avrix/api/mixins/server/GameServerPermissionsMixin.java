@@ -1,9 +1,10 @@
 package com.avrix.api.mixins.server;
 
 import com.avrix.api.permissions.PermissionsManager;
-import net.lenni0451.classtransform.annotations.CTarget;
-import net.lenni0451.classtransform.annotations.CTransformer;
-import net.lenni0451.classtransform.annotations.injection.CInject;
+import org.spongepowered.asm.mixin.Mixin;
+import org.spongepowered.asm.mixin.injection.At;
+import org.spongepowered.asm.mixin.injection.Inject;
+import org.spongepowered.asm.mixin.injection.callback.CallbackInfo;
 import zombie.characters.IsoPlayer;
 import zombie.core.network.ByteBufferReader;
 import zombie.core.raknet.UdpConnection;
@@ -11,13 +12,13 @@ import zombie.network.GameServer;
 import zombie.network.IConnection;
 
 /**
- * ClassTransform mixin for {@link GameServer} injecting hooks
+ * Mixin for {@link GameServer} injecting permission synchronization hooks.
  */
-@CTransformer(value = GameServer.class)
+@Mixin(GameServer.class)
 public class GameServerPermissionsMixin {
 
     /**
-     * Prevents instantiation of the transformer class.
+     * Prevents instantiation of the mixin class.
      */
     private GameServerPermissionsMixin() {
         throw new UnsupportedOperationException("Mixin classes cannot be instantiated");
@@ -26,20 +27,28 @@ public class GameServerPermissionsMixin {
     /**
      * Injects into {@link GameServer#receivePlayerConnect(ByteBufferReader, IConnection, String)}
      * right after the player is marked as fully connected and added to the world.
+     *
+     * @param reader     packet payload reader
+     * @param connection issuing connection
+     * @param username   name of the connecting player
+     * @param callback   injection callback provided by the mixin framework
      */
-    @CInject(
-            method = "receivePlayerConnect(Lzombie/core/network/ByteBufferReader;Lzombie/network/IConnection;Ljava/lang/String;)V",
-            target = @CTarget(
+    @Inject(
+            method = "receivePlayerConnect(Lzombie/core/network/ByteBufferReader;"
+                    + "Lzombie/network/IConnection;Ljava/lang/String;)V",
+            at = @At(
                     value = "INVOKE",
                     target = "Lzombie/network/IConnection;setFullyConnected()V",
-                    shift = CTarget.Shift.AFTER
+                    shift = At.Shift.AFTER
             )
     )
-    private static void onPlayerFullyConnected(ByteBufferReader bb, IConnection connection, String username) {
-        if (connection instanceof UdpConnection udpCon && udpCon.players != null) {
-            for (IsoPlayer player : udpCon.players) {
+    private static void onPlayerFullyConnected(
+            ByteBufferReader reader, IConnection connection, String username, CallbackInfo callback
+    ) {
+        if (connection instanceof UdpConnection udpConnection && udpConnection.players != null) {
+            for (IsoPlayer player : udpConnection.players) {
                 if (player != null && username.equalsIgnoreCase(player.getUsername())) {
-                    PermissionsManager.syncPlayerLoginRole(player, udpCon);
+                    PermissionsManager.syncPlayerLoginRole(player, udpConnection);
                 }
             }
         }
@@ -47,16 +56,19 @@ public class GameServerPermissionsMixin {
 
     /**
      * Injects into the dedicated-server main loop to process queued expiry work on the server thread.
+     *
+     * @param arguments command-line arguments passed to the server
+     * @param callback  injection callback provided by the mixin framework
      */
-    @CInject(
+    @Inject(
             method = "main([Ljava/lang/String;)V",
-            target = @CTarget(
+            at = @At(
                     value = "INVOKE",
                     target = "Lzombie/network/RCONServer;update()V",
-                    shift = CTarget.Shift.AFTER
+                    shift = At.Shift.AFTER
             )
     )
-    private static void onServerTick() {
+    private static void onServerTick(String[] arguments, CallbackInfo callback) {
         PermissionsManager.processPendingExpiryTasks();
     }
 }

@@ -2,21 +2,22 @@ package com.avrix.api.mixins.common;
 
 import com.avrix.api.network.NetworkSide;
 import com.avrix.api.network.PacketReceiveDispatcher;
-import net.lenni0451.classtransform.annotations.CTarget;
-import net.lenni0451.classtransform.annotations.CTransformer;
-import net.lenni0451.classtransform.annotations.injection.CInject;
+import org.spongepowered.asm.mixin.Mixin;
+import org.spongepowered.asm.mixin.injection.At;
+import org.spongepowered.asm.mixin.injection.Inject;
+import org.spongepowered.asm.mixin.injection.callback.CallbackInfo;
 import zombie.core.network.ByteBufferReader;
 import zombie.core.raknet.UdpConnection;
 import zombie.network.PacketTypes;
 
 /**
- * ClassTransform transformer that publishes an Avrix event before a native packet is processed.
+ * Mixin that publishes an Avrix event before a native packet is processed.
  */
-@CTransformer(value = PacketTypes.PacketType.class)
+@Mixin(PacketTypes.PacketType.class)
 public class PacketReceiveMixin {
 
     /**
-     * Prevents instantiation of the transformer class.
+     * Prevents instantiation of the mixin class.
      */
     private PacketReceiveMixin() {
         throw new UnsupportedOperationException("Mixin classes cannot be instantiated");
@@ -27,12 +28,16 @@ public class PacketReceiveMixin {
      *
      * @param reader     packet payload reader
      * @param connection sending client connection
+     * @param callback   injection callback provided by the mixin framework
      */
-    @CInject(
-            method = "onServerPacket(Lzombie/core/network/ByteBufferReader;Lzombie/core/raknet/UdpConnection;)V",
-            target = @CTarget("HEAD")
+    @Inject(
+            method = "onServerPacket(Lzombie/core/network/ByteBufferReader;"
+                    + "Lzombie/core/raknet/UdpConnection;)V",
+            at = @At("HEAD")
     )
-    private void onServerPacketReceived(ByteBufferReader reader, UdpConnection connection) {
+    private void onServerPacketReceived(
+            ByteBufferReader reader, UdpConnection connection, CallbackInfo callback
+    ) {
         PacketReceiveDispatcher.dispatch(
                 (PacketTypes.PacketType) (Object) this,
                 NetworkSide.SERVER,
@@ -44,13 +49,14 @@ public class PacketReceiveMixin {
     /**
      * Publishes a client-side packet received event.
      *
-     * @param reader packet payload reader
+     * @param reader   packet payload reader
+     * @param callback injection callback provided by the mixin framework
      */
-    @CInject(
+    @Inject(
             method = "onClientPacket(Lzombie/core/network/ByteBufferReader;)V",
-            target = @CTarget("HEAD")
+            at = @At("HEAD")
     )
-    private void onClientPacketReceived(ByteBufferReader reader) {
+    private void onClientPacketReceived(ByteBufferReader reader, CallbackInfo callback) {
         PacketReceiveDispatcher.dispatch(
                 (PacketTypes.PacketType) (Object) this,
                 NetworkSide.CLIENT,

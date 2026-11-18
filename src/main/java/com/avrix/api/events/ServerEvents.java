@@ -10,7 +10,8 @@ public enum ServerEvents implements Event {
      * <p><b>Parameters:</b></p>
      * <ul>
      *   <li>{@code UdpConnection connection} — the incoming client UDP connection.</li>
-     *   <li>{@code ServerWorldDatabase.LogonResult result} — authorization outcome containing status and assigned role.</li>
+     *   <li>{@code ServerWorldDatabase.LogonResult result} — authorization outcome containing
+     *   status and assigned role.</li>
      * </ul>
      */
     CLIENT_CONNECT("OnClientConnect"),
@@ -136,7 +137,7 @@ public enum ServerEvents implements Event {
      *
      * @param eventName game event name
      */
-    private ServerEvents(String eventName) {
+    ServerEvents(String eventName) {
         this.eventName = eventName;
     }
 

@@ -35,7 +35,9 @@ public record CommandContext(
      * @param rawCommand raw command input
      * @param args       parsed positional arguments
      */
-    public CommandContext(String senderName, IsoPlayer player, UdpConnection connection, String rawCommand, String[] args) {
+    public CommandContext(
+            String senderName, IsoPlayer player, UdpConnection connection, String rawCommand, String[] args
+    ) {
         this(senderName, CommandSource.fromLegacy(player, connection), player, connection, rawCommand, args);
     }
 

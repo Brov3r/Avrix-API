@@ -26,7 +26,9 @@ public record CustomEvent(String name) implements Event {
     }
 
     /**
-     * @return The unique identifier of this custom event.
+     * Returns the unique identifier of this custom event.
+     *
+     * @return the unique identifier of this custom event
      */
     @Override
     public String getName() {

@@ -263,6 +263,7 @@ public final class LuaScriptLoader {
      * source explicitly when modules use paths above that directory.
      *
      * @param file Lua file
+     * @throws IllegalArgumentException if the file has no parent directory
      */
     public static void load(Path file) {
         Objects.requireNonNull(file, "file");
@@ -285,6 +286,7 @@ public final class LuaScriptLoader {
      *
      * @param jar   JAR path
      * @param entry entry name such as {@code lua/module/main.lua}
+     * @throws IllegalArgumentException if the normalized entry name is blank
      */
     public static void loadFromJar(Path jar, String entry) {
         Objects.requireNonNull(jar, "jar");
@@ -602,6 +604,7 @@ public final class LuaScriptLoader {
             case SINGLE -> executeSingle(request, request.modules().get(0));
             case MULTIPLE -> request.modules().forEach(module -> executeSingle(request, module));
             case GROUP -> executeGroup(request);
+            default -> throw new IllegalStateException("Unknown load request type: " + request.type());
         }
     }
 

@@ -4,7 +4,7 @@
 build/
 !**/src/**/build/
 
-# Runtime (рабочие папки в корне)
+# Runtime
 /logs/
 /plugins/
 *.log

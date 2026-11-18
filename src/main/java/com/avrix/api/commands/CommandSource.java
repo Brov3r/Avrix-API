@@ -104,7 +104,9 @@ public record CommandSource(
     public static CommandSource player(UdpConnection connection, IsoPlayer player) {
         Objects.requireNonNull(connection, "Connection cannot be null");
         Objects.requireNonNull(player, "Player cannot be null");
-        return new CommandSource(Type.PLAYER, resolvePlayerName(player), player, connection, resolveAddress(connection));
+        return new CommandSource(
+                Type.PLAYER, resolvePlayerName(player), player, connection, resolveAddress(connection)
+        );
     }
 
     /**

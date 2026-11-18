@@ -222,7 +222,7 @@ public final class LuaScriptEnvironment {
         try {
             LuaClosure closure;
             try (InputStream input = module.source().open(module.path());
-                 Reader reader = openReader(input)) {
+                    Reader reader = openReader(input)) {
                 closure = compile(reader, module.id());
             }
 

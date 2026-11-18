@@ -17,7 +17,8 @@ import java.util.Map;
  * @param prefix       visual chat and name prefix displayed before the player's name
  * @param suffix       visual chat and name suffix displayed after the player's name
  * @param permissions  collection of string permission nodes granted to this group (supports {@code "-node"} negation)
- * @param capabilities collection of native Project Zomboid {@link zombie.characters.Capability} enum names granted to this role
+ * @param capabilities collection of native Project Zomboid {@link zombie.characters.Capability} enum names
+ *                     granted to this role
  * @param parents      collection of parent group names from which this role inherits permissions and metadata;
  *                     native capabilities are not inherited and must be listed explicitly
  * @param metadata     arbitrary key-value metadata storage associated with this role

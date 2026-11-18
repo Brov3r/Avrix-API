@@ -5,7 +5,12 @@ import zombie.characters.Role;
 import zombie.characters.Roles;
 import zombie.core.Color;
 
-import java.util.*;
+import java.util.HashSet;
+import java.util.List;
+import java.util.Locale;
+import java.util.Map;
+import java.util.Objects;
+import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.CopyOnWriteArraySet;
 
@@ -381,7 +386,9 @@ public class ExtendedRole extends Role {
      * @param value the string value, or {@code null} to remove the key
      */
     public void setMeta(String key, String value) {
-        if (key == null || key.isBlank()) return;
+        if (key == null || key.isBlank()) {
+            return;
+        }
 
         if (value == null) {
             this.metadata.remove(key.strip().toLowerCase(Locale.ROOT));
@@ -408,18 +415,26 @@ public class ExtendedRole extends Role {
      * @return resolved value or {@code null}
      */
     private String getMeta(String key, Set<String> visitedRoles) {
-        if (key == null || key.isBlank()) return null;
-        if (!visitedRoles.add(this.getName().toLowerCase(Locale.ROOT))) return null;
+        if (key == null || key.isBlank()) {
+            return null;
+        }
+        if (!visitedRoles.add(this.getName().toLowerCase(Locale.ROOT))) {
+            return null;
+        }
 
         String normalizedKey = key.strip().toLowerCase(Locale.ROOT);
         String local = this.metadata.get(normalizedKey);
-        if (local != null) return local;
+        if (local != null) {
+            return local;
+        }
 
         for (String parentName : this.parents) {
             ExtendedRole parentExtended = resolveParentRole(parentName);
             if (parentExtended != null) {
                 String inherited = parentExtended.getMeta(key, visitedRoles);
-                if (inherited != null) return inherited;
+                if (inherited != null) {
+                    return inherited;
+                }
             }
         }
 

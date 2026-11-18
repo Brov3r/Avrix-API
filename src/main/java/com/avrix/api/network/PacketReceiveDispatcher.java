@@ -34,7 +34,8 @@ public final class PacketReceiveDispatcher {
             UdpConnection connection,
             ByteBufferReader reader
     ) {
-        if (type == null || side == null || reader == null || !EventManager.hasListeners(NetworkEvents.PACKET_RECEIVED)) {
+        if (type == null || side == null || reader == null
+                || !EventManager.hasListeners(NetworkEvents.PACKET_RECEIVED)) {
             return;
         }
 

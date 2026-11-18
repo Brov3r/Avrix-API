@@ -18,7 +18,8 @@ public record PermissionsConfig(
         @Comment("Global role definitions, permissions, native capabilities, and inheritance hierarchies")
         Map<String, RoleConfig> groups,
 
-        @Comment("User-specific permission nodes, temporary grants, and group bindings indexed by Username or SteamID64")
+        @Comment("User-specific permission nodes, temporary grants, and group bindings indexed by "
+                + "Username or SteamID64")
         Map<String, UserPermissionConfig> users
 ) {
 

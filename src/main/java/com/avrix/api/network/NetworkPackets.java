@@ -3,7 +3,6 @@ package com.avrix.api.network;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import zombie.characters.IsoPlayer;
-import zombie.core.raknet.UdpConnection;
 import zombie.network.GameClient;
 import zombie.network.GameServer;
 import zombie.network.IConnection;

@@ -37,7 +37,20 @@ import java.nio.file.StandardCopyOption;
 import java.sql.Connection;
 import java.sql.SQLException;
 import java.time.Instant;
-import java.util.*;
+import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.Collection;
+import java.util.Collections;
+import java.util.Comparator;
+import java.util.HashMap;
+import java.util.HashSet;
+import java.util.LinkedHashMap;
+import java.util.List;
+import java.util.Locale;
+import java.util.Map;
+import java.util.Objects;
+import java.util.Queue;
+import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentLinkedQueue;
 import java.util.concurrent.Executors;
@@ -63,7 +76,8 @@ public final class PermissionsManager {
     private static final Map<String, String> CONFIGURED_USER_GROUPS = new ConcurrentHashMap<>();
     private static final Map<String, String> CONFIGURED_USER_PREFIXES = new ConcurrentHashMap<>();
     private static final Map<String, String> CONFIGURED_USER_SUFFIXES = new ConcurrentHashMap<>();
-    private static final Map<String, Map<String, PlayerPermission>> CUSTOM_PLAYER_PERMISSIONS = new ConcurrentHashMap<>();
+    private static final Map<String, Map<String, PlayerPermission>> CUSTOM_PLAYER_PERMISSIONS =
+            new ConcurrentHashMap<>();
     private static final Map<String, Map<String, PlayerPermission>> YAML_PLAYER_PERMISSIONS = new ConcurrentHashMap<>();
     private static final Set<String> YAML_CREATED_ROLES = ConcurrentHashMap.newKeySet();
     private static final Map<String, TemporaryRoleEntry> TEMPORARY_USER_ROLES = new ConcurrentHashMap<>();
@@ -82,11 +96,12 @@ public final class PermissionsManager {
         throw new UnsupportedOperationException("Utility class cannot be instantiated");
     }
 
-    private static final ScheduledExecutorService EXPIRATION_SCHEDULER = Executors.newSingleThreadScheduledExecutor(r -> {
-        Thread thread = new Thread(r, "Avrix-Permissions-Expiry-Tracker");
-        thread.setDaemon(true);
-        return thread;
-    });
+    private static final ScheduledExecutorService EXPIRATION_SCHEDULER =
+            Executors.newSingleThreadScheduledExecutor(r -> {
+                Thread thread = new Thread(r, "Avrix-Permissions-Expiry-Tracker");
+                thread.setDaemon(true);
+                return thread;
+            });
 
     static {
         registerExpiryTickListener();
@@ -177,11 +192,13 @@ public final class PermissionsManager {
      * @param fallbackRole role restored after expiration
      * @return {@code true} if the role was assigned
      */
-    public static boolean assignTemporaryRole(String identifier, String roleName, long duration, TimeUnit unit, String fallbackRole) {
+    public static boolean assignTemporaryRole(
+            String identifier, String roleName, long duration, TimeUnit unit, String fallbackRole) {
         if (duration <= 0 || unit == null) {
             return false;
         }
-        return assignTemporaryRole(identifier, roleName, Instant.now().plusMillis(unit.toMillis(duration)), fallbackRole);
+        return assignTemporaryRole(
+                identifier, roleName, Instant.now().plusMillis(unit.toMillis(duration)), fallbackRole);
     }
 
     /**
@@ -193,7 +210,8 @@ public final class PermissionsManager {
      * @param fallbackRole role restored after expiration
      * @return {@code true} if the role was assigned
      */
-    public static boolean assignTemporaryRole(String identifier, String roleName, Instant expiration, String fallbackRole) {
+    public static boolean assignTemporaryRole(
+            String identifier, String roleName, Instant expiration, String fallbackRole) {
         if (identifier == null || identifier.isBlank() || roleName == null || roleName.isBlank()
                 || expiration == null || !expiration.isAfter(Instant.now())) {
             return false;
@@ -202,7 +220,9 @@ public final class PermissionsManager {
         String fallback = fallbackRole != null && !fallbackRole.isBlank() ? fallbackRole : "user";
 
         boolean success = assignRole(identifier, roleName);
-        if (!success) return false;
+        if (!success) {
+            return false;
+        }
 
         String key = normalizeIdentifier(identifier);
         TEMPORARY_USER_ROLES.put(key, new TemporaryRoleEntry(roleName, expiration, fallback));
@@ -307,7 +327,9 @@ public final class PermissionsManager {
         String fallback = tempRole.fallbackRole();
         if (!assignRole(identifier, fallback)) {
             TEMPORARY_USER_ROLES.putIfAbsent(identifier, tempRole);
-            LOGGER.warn("Temporary role '{}' expired for user '{}' but fallback role '{}' could not be assigned; retrying later",
+            LOGGER.warn(
+                    "Temporary role '{}' expired for user '{}' but fallback role '{}' could not be assigned; "
+                            + "retrying later",
                     tempRole.roleName(), identifier, fallback);
             return;
         }
@@ -317,15 +339,20 @@ public final class PermissionsManager {
         }
         Connection conn = getDatabaseConnection();
         if (conn != null && !DatabasePermissionsHelper.deleteTemporaryRole(conn, identifier)) {
-            LOGGER.error("Failed to delete expired temporary role from SQLite for user '{}'; retrying later", identifier);
+            LOGGER.error(
+                    "Failed to delete expired temporary role from SQLite for user '{}'; retrying later", identifier);
         }
 
         notifyRoleExpired(identifier, tempRole.roleName(), fallback);
-        LOGGER.info("Temporary role '{}' expired for user '{}'. Reverted to '{}'", tempRole.roleName(), identifier, fallback);
+        LOGGER.info(
+                "Temporary role '{}' expired for user '{}'. Reverted to '{}'",
+                tempRole.roleName(), identifier, fallback);
     }
 
     private static void notifyRoleExpired(String identifier, String oldRole, String newRole) {
-        if (!GameServer.server || GameServer.Players == null) return;
+        if (!GameServer.server || GameServer.Players == null) {
+            return;
+        }
 
         for (int i = 0; i < GameServer.Players.size(); i++) {
             IsoPlayer p = GameServer.Players.get(i);
@@ -469,10 +496,14 @@ public final class PermissionsManager {
         if (config.groups() != null) {
             for (Map.Entry<String, RoleConfig> entry : config.groups().entrySet()) {
                 String roleName = entry.getKey() != null ? entry.getKey().strip() : "";
-                if (roleName.isEmpty()) continue;
+                if (roleName.isEmpty()) {
+                    continue;
+                }
 
                 RoleConfig rCfg = entry.getValue();
-                if (rCfg == null) continue;
+                if (rCfg == null) {
+                    continue;
+                }
 
                 // Find existing role index by case-insensitive name
                 int existingIndex = -1;
@@ -534,7 +565,9 @@ public final class PermissionsManager {
                 // Capabilities mapping
                 if (rCfg.capabilities() != null) {
                     for (String capName : rCfg.capabilities()) {
-                        if (capName == null || capName.isBlank()) continue;
+                        if (capName == null || capName.isBlank()) {
+                            continue;
+                        }
                         if ("*".equals(capName.strip())) {
                             for (Capability c : Capability.values()) {
                                 if (c != null && c != Capability.None
@@ -578,7 +611,9 @@ public final class PermissionsManager {
                     rCfg.metadata().forEach(extendedRole::setMeta);
                 }
 
-                LOGGER.debug("Configured role '{}' [ID: {}, Pos: {}] -> Prefix: '{}', Suffix: '{}', Caps: {}, Perms: {}, Parents: {}",
+                LOGGER.debug(
+                        "Configured role '{}' [ID: {}, Pos: {}] -> Prefix: '{}', Suffix: '{}', Caps: {}, "
+                                + "Perms: {}, Parents: {}",
                         roleName,
                         extendedRole.getId(),
                         extendedRole.getPosition(),
@@ -612,11 +647,15 @@ public final class PermissionsManager {
         if (config.users() != null) {
             for (Map.Entry<String, UserPermissionConfig> entry : config.users().entrySet()) {
                 String rawIdentifier = entry.getKey();
-                if (rawIdentifier == null || rawIdentifier.isBlank()) continue;
+                if (rawIdentifier == null || rawIdentifier.isBlank()) {
+                    continue;
+                }
 
                 String identifier = normalizeIdentifier(rawIdentifier);
                 UserPermissionConfig uCfg = entry.getValue();
-                if (uCfg == null) continue;
+                if (uCfg == null) {
+                    continue;
+                }
 
                 // Cache configured group in memory ONLY. Never create stub DB accounts!
                 if (uCfg.group() != null && !uCfg.group().isBlank()) {
@@ -643,7 +682,9 @@ public final class PermissionsManager {
 
                 if (uCfg.temporaryPermissions() != null) {
                     for (Map.Entry<String, String> tempEntry : uCfg.temporaryPermissions().entrySet()) {
-                        if (tempEntry.getKey() == null || tempEntry.getValue() == null) continue;
+                        if (tempEntry.getKey() == null || tempEntry.getValue() == null) {
+                            continue;
+                        }
                         try {
                             Instant expireAt = Instant.parse(tempEntry.getValue().strip());
                             if (!expireAt.isAfter(Instant.now())) {
@@ -714,7 +755,9 @@ public final class PermissionsManager {
      * @return {@code true} for immutable system roles
      */
     public static boolean isImmutableRole(String roleName) {
-        if (roleName == null || roleName.isBlank()) return false;
+        if (roleName == null || roleName.isBlank()) {
+            return false;
+        }
         String name = roleName.strip().toLowerCase(Locale.ROOT);
         return "user".equals(name) || "banned".equals(name);
     }
@@ -754,7 +797,9 @@ public final class PermissionsManager {
 
         Role role = findRole(targetGroup);
         if (role == null) {
-            LOGGER.warn("Configured role '{}' for user '{}' not found in registered roles registry", targetGroup, rawUsername);
+            LOGGER.warn(
+                    "Configured role '{}' for user '{}' not found in registered roles registry",
+                    targetGroup, rawUsername);
             return;
         }
 
@@ -817,7 +862,7 @@ public final class PermissionsManager {
                 #   - temporaryPermissions: Map of permission node -> ISO-8601 expiration date.
                 #                           Format: "YYYY-MM-DDTHH:MM:SSZ" (e.g. "2026-12-31T23:59:59Z")
                 # =========================================================================
-                
+
                 groups:
                   admin:
                     description: "Server Administrator with full root access"
@@ -829,7 +874,7 @@ public final class PermissionsManager {
                     capabilities:
                       - "*"
                     parents: []
-                
+
                   moderator:
                     description: "Server Moderator - all capabilities except core server control"
                     color: "50,255,50,255"
@@ -878,7 +923,7 @@ public final class PermissionsManager {
                       - "InspectPlayerInventory"
                     parents:
                       - "user"
-                
+
                   priority:
                     description: "Player with server login queue priority"
                     color: "230,230,230,255"
@@ -891,7 +936,7 @@ public final class PermissionsManager {
                       - "CantBeKickedIfTooLaggy"
                     parents:
                       - "user"
-                
+
                   vip:
                     description: "VIP Supporter role example"
                     color: "255,215,0,255"
@@ -902,7 +947,7 @@ public final class PermissionsManager {
                       - "PriorityLogin"
                     parents:
                       - "user"
-                
+
                   user:
                     description: "Default Survivor"
                     color: "255,255,255,255"
@@ -912,7 +957,7 @@ public final class PermissionsManager {
                     capabilities:
                       - "LoginOnServer"
                     parents: []
-                
+
                 users: {}
                   # Add user-specific assignments here. Examples are intentionally commented out
                   # so a fresh installation never grants elevated access to a real player.
@@ -1051,12 +1096,15 @@ public final class PermissionsManager {
     }
 
     /**
-     * Persists a role definition to the SQLite database and synchronizes it across connected clients if network is ready.
+     * Persists a role definition to the SQLite database and synchronizes it across connected clients if
+     * network is ready.
      *
      * @param role the role instance to persist
      */
     public static void saveRoleToDatabase(Role role) {
-        if (role == null) return;
+        if (role == null) {
+            return;
+        }
         if (GameServer.server && ServerWorldDatabase.instance != null) {
             try {
                 ServerWorldDatabase.instance.saveRole(role);
@@ -1096,7 +1144,9 @@ public final class PermissionsManager {
      * @return {@code true} if deleted successfully; {@code false} if not found or read-only
      */
     public static boolean deleteRole(String roleName, String adminName) {
-        if (roleName == null || roleName.isBlank()) return false;
+        if (roleName == null || roleName.isBlank()) {
+            return false;
+        }
         if (isImmutableRole(roleName)) {
             LOGGER.warn("Attempted to delete immutable system role: '{}'", roleName);
             return false;
@@ -1126,9 +1176,13 @@ public final class PermissionsManager {
      * @return {@code true} if assigned successfully; {@code false} if not found
      */
     public static boolean assignRole(IsoPlayer player, String roleName) {
-        if (player == null || roleName == null || roleName.isBlank()) return false;
+        if (player == null || roleName == null || roleName.isBlank()) {
+            return false;
+        }
         Role role = findRole(roleName);
-        if (role == null) return false;
+        if (role == null) {
+            return false;
+        }
 
         Role oldRole = player.getRole();
         String username = player.getUsername();
@@ -1158,14 +1212,20 @@ public final class PermissionsManager {
      * @return {@code true} if assigned successfully; {@code false} if not found
      */
     public static boolean assignRole(UdpConnection connection, String roleName) {
-        if (connection == null || roleName == null || roleName.isBlank()) return false;
+        if (connection == null || roleName == null || roleName.isBlank()) {
+            return false;
+        }
         Role role = findRole(roleName);
-        if (role == null) return false;
+        if (role == null) {
+            return false;
+        }
 
         boolean changed = false;
         if (connection.players != null) {
             for (IsoPlayer player : connection.players) {
-                if (player == null) continue;
+                if (player == null) {
+                    continue;
+                }
                 String username = player.getUsername();
                 Role oldRole = player.getRole();
                 boolean applied = canUseVanillaRoleChange(username) && applyVanillaRoleChange(username, role);
@@ -1209,11 +1269,15 @@ public final class PermissionsManager {
      * @return {@code true} if assigned; {@code false} if not found or persistence failed
      */
     public static boolean assignRole(String identifier, String roleName) {
-        if (identifier == null || identifier.isBlank() || roleName == null || roleName.isBlank()) return false;
+        if (identifier == null || identifier.isBlank() || roleName == null || roleName.isBlank()) {
+            return false;
+        }
 
         String clean = normalizeIdentifier(identifier);
         Role role = findRole(roleName);
-        if (role == null) return false;
+        if (role == null) {
+            return false;
+        }
 
         if (GameServer.server) {
             if (GameServer.Players != null) {
@@ -1318,7 +1382,9 @@ public final class PermissionsManager {
      * @return matching role or null if not found
      */
     private static Role findRole(String roleName) {
-        if (roleName == null || roleName.isBlank()) return null;
+        if (roleName == null || roleName.isBlank()) {
+            return null;
+        }
         String clean = normalizeIdentifier(roleName);
 
         List<Role> allRoles = Roles.getRoles();
@@ -1340,8 +1406,12 @@ public final class PermissionsManager {
      * @return {@code true} if the role was written to the whitelist
      */
     private static boolean persistUserRole(String username, Role role) {
-        if (username == null || username.isBlank() || role == null) return false;
-        if (!GameServer.server || ServerWorldDatabase.instance == null) return false;
+        if (username == null || username.isBlank() || role == null) {
+            return false;
+        }
+        if (!GameServer.server || ServerWorldDatabase.instance == null) {
+            return false;
+        }
         try {
             String target = username;
             if (!ServerWorldDatabase.instance.containsUser(target)) {
@@ -1389,7 +1459,8 @@ public final class PermissionsManager {
      * @param unit           time unit
      * @return {@code true} if granted, {@code false} if parameters are invalid
      */
-    public static boolean grantPermissionToPlayer(String identifier, String permissionNode, long duration, TimeUnit unit) {
+    public static boolean grantPermissionToPlayer(
+            String identifier, String permissionNode, long duration, TimeUnit unit) {
         if (duration <= 0 || unit == null) {
             return false;
         }
@@ -1632,13 +1703,23 @@ public final class PermissionsManager {
         }
 
         // Explicit denials always win, regardless of the identity source.
-        if (role instanceof ExtendedRole extendedRole && extendedRole.deniesPermission(target)) return false;
-        if (!username.isEmpty() && checkDirectPermissions(username, target, true)) return false;
-        if (steamId != null && checkDirectPermissions(steamId, target, true)) return false;
+        if (role instanceof ExtendedRole extendedRole && extendedRole.deniesPermission(target)) {
+            return false;
+        }
+        if (!username.isEmpty() && checkDirectPermissions(username, target, true)) {
+            return false;
+        }
+        if (steamId != null && checkDirectPermissions(steamId, target, true)) {
+            return false;
+        }
 
         // Positive direct grants.
-        if (!username.isEmpty() && checkDirectPermissions(username, target, false)) return true;
-        if (steamId != null && checkDirectPermissions(steamId, target, false)) return true;
+        if (!username.isEmpty() && checkDirectPermissions(username, target, false)) {
+            return true;
+        }
+        if (steamId != null && checkDirectPermissions(steamId, target, false)) {
+            return true;
+        }
 
         return hasPermission(role, permissionNode);
     }
@@ -1653,7 +1734,9 @@ public final class PermissionsManager {
      */
     private static boolean checkDirectPermissions(String key, String target, boolean negationCheck) {
         Map<String, PlayerPermission> nodes = CUSTOM_PLAYER_PERMISSIONS.get(key);
-        if (nodes == null || nodes.isEmpty()) return false;
+        if (nodes == null || nodes.isEmpty()) {
+            return false;
+        }
 
         if (negationCheck) {
             for (PlayerPermission perm : nodes.values()) {
@@ -1702,10 +1785,18 @@ public final class PermissionsManager {
         long steamId = connection.getSteamId();
         String steamIdStr = steamId != 0L ? Long.toUnsignedString(steamId) : null;
 
-        if (!username.isEmpty() && checkDirectPermissions(username, target, true)) return false;
-        if (steamIdStr != null && checkDirectPermissions(steamIdStr, target, true)) return false;
-        if (!username.isEmpty() && checkDirectPermissions(username, target, false)) return true;
-        if (steamIdStr != null && checkDirectPermissions(steamIdStr, target, false)) return true;
+        if (!username.isEmpty() && checkDirectPermissions(username, target, true)) {
+            return false;
+        }
+        if (steamIdStr != null && checkDirectPermissions(steamIdStr, target, true)) {
+            return false;
+        }
+        if (!username.isEmpty() && checkDirectPermissions(username, target, false)) {
+            return true;
+        }
+        if (steamIdStr != null && checkDirectPermissions(steamIdStr, target, false)) {
+            return true;
+        }
 
         Role role = connection.getRole();
         if (role == null) {
@@ -1723,8 +1814,12 @@ public final class PermissionsManager {
      * @return {@code true} if authorized
      */
     public static boolean hasPermission(Role role, String permissionNode) {
-        if (role == null || permissionNode == null || permissionNode.isBlank()) return false;
-        if (Role.isUsingDebugMode()) return true;
+        if (role == null || permissionNode == null || permissionNode.isBlank()) {
+            return false;
+        }
+        if (Role.isUsingDebugMode()) {
+            return true;
+        }
 
         String cleanNode = permissionNode.strip();
         if (role instanceof ExtendedRole er && er.hasPermission(cleanNode)) {
@@ -1743,7 +1838,9 @@ public final class PermissionsManager {
      * @return {@code true} if authorized
      */
     public static boolean hasCapability(IsoPlayer player, Capability capability) {
-        if (player == null || capability == null || capability == Capability.None) return false;
+        if (player == null || capability == null || capability == Capability.None) {
+            return false;
+        }
         return Role.hasCapability(player, capability);
     }
 
@@ -1755,8 +1852,12 @@ public final class PermissionsManager {
      * @return {@code true} if authorized
      */
     public static boolean hasCapability(UdpConnection connection, Capability capability) {
-        if (connection == null || capability == null || capability == Capability.None) return false;
-        if (Role.isUsingDebugMode()) return true;
+        if (connection == null || capability == null || capability == Capability.None) {
+            return false;
+        }
+        if (Role.isUsingDebugMode()) {
+            return true;
+        }
 
         Role role = connection.getRole();
         if (role == null) {
@@ -1774,7 +1875,9 @@ public final class PermissionsManager {
      * @return {@code true} if authorized
      */
     public static boolean hasCapability(Role role, Capability capability) {
-        if (role == null || capability == null || capability == Capability.None) return false;
+        if (role == null || capability == null || capability == Capability.None) {
+            return false;
+        }
         return role.hasCapability(capability);
     }
 
@@ -1790,7 +1893,9 @@ public final class PermissionsManager {
             return false;
         }
 
-        if (Role.isUsingDebugMode()) return true;
+        if (Role.isUsingDebugMode()) {
+            return true;
+        }
 
         String clean = normalizeIdentifier(username);
 
@@ -1902,7 +2007,9 @@ public final class PermissionsManager {
      * @return numeric SteamID string or {@code null} if not playing in Steam mode
      */
     private static String getSteamID(IsoPlayer player) {
-        if (player == null) return null;
+        if (player == null) {
+            return null;
+        }
         long steamId = player.getSteamID();
         if (steamId != 0L) {
             return Long.toUnsignedString(steamId);
@@ -1958,7 +2065,9 @@ public final class PermissionsManager {
      * @return parsed Project Zomboid {@link Color}
      */
     private static Color parseColor(String rgba) {
-        if (rgba == null || rgba.isBlank()) return Color.white;
+        if (rgba == null || rgba.isBlank()) {
+            return Color.white;
+        }
         try {
             String[] parts = rgba.split(",");
             if (parts.length < 3) {
@@ -2008,7 +2117,9 @@ public final class PermissionsManager {
      * @return normalized lowercase identifier
      */
     public static String normalizeIdentifier(String raw) {
-        if (raw == null) return "";
+        if (raw == null) {
+            return "";
+        }
         String s = raw.strip();
         if ((s.startsWith("\"") && s.endsWith("\"")) || (s.startsWith("'") && s.endsWith("'"))) {
             if (s.length() >= 2) {
@@ -2025,7 +2136,9 @@ public final class PermissionsManager {
      * @param newRole  the updated ExtendedRole instance
      */
     private static void syncRolesStaticField(String roleName, ExtendedRole newRole) {
-        if (roleName == null) return;
+        if (roleName == null) {
+            return;
+        }
         switch (roleName.toLowerCase(Locale.ROOT)) {
             case "admin" -> updateRolesField("defaultForAdmin", newRole);
             case "user" -> {

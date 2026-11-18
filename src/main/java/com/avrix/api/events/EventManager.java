@@ -601,25 +601,55 @@ public final class EventManager {
         }
 
         private static Object getDefaultPrimitiveValue(Class<?> type) {
-            if (type == boolean.class) return false;
-            if (type == int.class) return 0;
-            if (type == float.class) return 0.0f;
-            if (type == double.class) return 0.0d;
-            if (type == long.class) return 0L;
-            if (type == short.class) return (short) 0;
-            if (type == byte.class) return (byte) 0;
-            if (type == char.class) return '\0';
+            if (type == boolean.class) {
+                return false;
+            }
+            if (type == int.class) {
+                return 0;
+            }
+            if (type == float.class) {
+                return 0.0f;
+            }
+            if (type == double.class) {
+                return 0.0d;
+            }
+            if (type == long.class) {
+                return 0L;
+            }
+            if (type == short.class) {
+                return (short) 0;
+            }
+            if (type == byte.class) {
+                return (byte) 0;
+            }
+            if (type == char.class) {
+                return '\0';
+            }
             return null;
         }
 
         private static Object adaptNumber(Number number, Class<?> targetType) {
-            if (targetType == int.class) return number.intValue();
-            if (targetType == float.class) return number.floatValue();
-            if (targetType == double.class) return number.doubleValue();
-            if (targetType == long.class) return number.longValue();
-            if (targetType == byte.class) return number.byteValue();
-            if (targetType == short.class) return number.shortValue();
-            if (targetType == char.class) return (char) number.intValue();
+            if (targetType == int.class) {
+                return number.intValue();
+            }
+            if (targetType == float.class) {
+                return number.floatValue();
+            }
+            if (targetType == double.class) {
+                return number.doubleValue();
+            }
+            if (targetType == long.class) {
+                return number.longValue();
+            }
+            if (targetType == byte.class) {
+                return number.byteValue();
+            }
+            if (targetType == short.class) {
+                return number.shortValue();
+            }
+            if (targetType == char.class) {
+                return (char) number.intValue();
+            }
             return number;
         }
     }

@@ -8,7 +8,14 @@ import zombie.network.GameServer;
 
 import java.nio.file.Files;
 import java.nio.file.Path;
-import java.sql.*;
+import java.sql.Connection;
+import java.sql.DatabaseMetaData;
+import java.sql.DriverManager;
+import java.sql.PreparedStatement;
+import java.sql.ResultSet;
+import java.sql.SQLException;
+import java.sql.Statement;
+import java.sql.Types;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.List;
@@ -145,7 +152,9 @@ public final class DatabasePermissionsHelper {
      * @param conn the active SQLite database connection
      */
     public static void initDatabaseSchema(Connection conn) {
-        if (conn == null) return;
+        if (conn == null) {
+            return;
+        }
 
         try (Statement stat = conn.createStatement()) {
             stat.executeUpdate("""
@@ -155,7 +164,7 @@ public final class DatabasePermissionsHelper {
                         )
                     """);
             stat.executeUpdate("""
-                        CREATE UNIQUE INDEX IF NOT EXISTS idx_role_permissions_unique 
+                        CREATE UNIQUE INDEX IF NOT EXISTS idx_role_permissions_unique
                         ON role_permissions (role, node)
                     """);
 
@@ -166,7 +175,7 @@ public final class DatabasePermissionsHelper {
                         )
                     """);
             stat.executeUpdate("""
-                        CREATE UNIQUE INDEX IF NOT EXISTS idx_role_parents_unique 
+                        CREATE UNIQUE INDEX IF NOT EXISTS idx_role_parents_unique
                         ON role_parents (role, parent)
                     """);
 
@@ -178,7 +187,7 @@ public final class DatabasePermissionsHelper {
                         )
                     """);
             stat.executeUpdate("""
-                        CREATE UNIQUE INDEX IF NOT EXISTS idx_role_metadata_unique 
+                        CREATE UNIQUE INDEX IF NOT EXISTS idx_role_metadata_unique
                         ON role_metadata (role, meta_key)
                     """);
 
@@ -191,7 +200,7 @@ public final class DatabasePermissionsHelper {
                         )
                     """);
             stat.executeUpdate("""
-                        CREATE UNIQUE INDEX IF NOT EXISTS idx_player_permissions_unique 
+                        CREATE UNIQUE INDEX IF NOT EXISTS idx_player_permissions_unique
                         ON player_permissions (identifier, node)
                     """);
 
@@ -251,7 +260,8 @@ public final class DatabasePermissionsHelper {
                 }
             }
         } catch (SQLException e) {
-            DebugType.Multiplayer.printException(e, "Failed to initialize ExtendedRole database schema", LogSeverity.Error);
+            DebugType.Multiplayer.printException(
+                    e, "Failed to initialize ExtendedRole database schema", LogSeverity.Error);
         }
     }
 
@@ -265,13 +275,16 @@ public final class DatabasePermissionsHelper {
      * @param fallbackRole role restored after expiration
      * @return {@code true} if the record was saved
      */
-    public static boolean saveTemporaryRole(Connection conn, String identifier, String role, Instant expiration, String fallbackRole) {
-        if (conn == null || identifier == null || role == null || expiration == null) return false;
+    public static boolean saveTemporaryRole(
+            Connection conn, String identifier, String role, Instant expiration, String fallbackRole) {
+        if (conn == null || identifier == null || role == null || expiration == null) {
+            return false;
+        }
 
         String sql = """
                 INSERT INTO player_temporary_roles (identifier, role, expiration, fallback_role)
                 VALUES (?, ?, ?, ?)
-                ON CONFLICT(identifier) DO UPDATE SET 
+                ON CONFLICT(identifier) DO UPDATE SET
                     role = excluded.role,
                     expiration = excluded.expiration,
                     fallback_role = excluded.fallback_role
@@ -297,7 +310,9 @@ public final class DatabasePermissionsHelper {
      * @return {@code true} if the record was deleted
      */
     public static boolean deleteTemporaryRole(Connection conn, String identifier) {
-        if (conn == null || identifier == null) return false;
+        if (conn == null || identifier == null) {
+            return false;
+        }
         return executeLocked("Failed to delete temporary role for user: " + identifier, () -> {
             try (PreparedStatement stat = conn.prepareStatement(
                     "DELETE FROM player_temporary_roles WHERE identifier = ?")) {
@@ -308,7 +323,8 @@ public final class DatabasePermissionsHelper {
     }
 
     /**
-     * Synchronizes temporary roles on server boot: reverts expired roles in the whitelist and loads active ones into memory.
+     * Synchronizes temporary roles on server boot: reverts expired roles in the whitelist and loads
+     * active ones into memory.
      * <p>
      * Expired records are only deleted after the fallback role was successfully written. If the fallback role is
      * unavailable, the record is kept so a later expiry pass can retry the revert.
@@ -317,7 +333,9 @@ public final class DatabasePermissionsHelper {
      * @param targetMap destination in-memory temporary role map
      */
     public static void loadAllTemporaryRoles(Connection conn, Map<String, TemporaryRoleEntry> targetMap) {
-        if (conn == null || targetMap == null) return;
+        if (conn == null || targetMap == null) {
+            return;
+        }
 
         DATABASE_LOCK.lock();
         try {
@@ -325,29 +343,29 @@ public final class DatabasePermissionsHelper {
             List<TemporaryRoleRow> rows = new ArrayList<>();
 
             try (Statement stat = conn.createStatement();
-             ResultSet rs = stat.executeQuery(
-                     "SELECT identifier, role, expiration, fallback_role FROM player_temporary_roles")) {
-            while (rs.next()) {
-                String identifier = PermissionsManager.normalizeIdentifier(rs.getString("identifier"));
-                String role = rs.getString("role");
-                Instant expiration = Instant.ofEpochMilli(rs.getLong("expiration"));
-                String fallback = rs.getString("fallback_role");
-                if (!identifier.isEmpty() && role != null && !role.isBlank() && expiration != null) {
-                    rows.add(new TemporaryRoleRow(identifier, role, expiration, fallback));
+                    ResultSet rs = stat.executeQuery(
+                            "SELECT identifier, role, expiration, fallback_role FROM player_temporary_roles")) {
+                while (rs.next()) {
+                    String identifier = PermissionsManager.normalizeIdentifier(rs.getString("identifier"));
+                    String role = rs.getString("role");
+                    Instant expiration = Instant.ofEpochMilli(rs.getLong("expiration"));
+                    String fallback = rs.getString("fallback_role");
+                    if (!identifier.isEmpty() && role != null && !role.isBlank() && expiration != null) {
+                        rows.add(new TemporaryRoleRow(identifier, role, expiration, fallback));
+                    }
                 }
+            } catch (SQLException e) {
+                DebugType.Multiplayer.printException(e, "Failed to read temporary roles", LogSeverity.Error);
+                return;
             }
-        } catch (SQLException e) {
-            DebugType.Multiplayer.printException(e, "Failed to read temporary roles", LogSeverity.Error);
-            return;
-        }
 
-        for (TemporaryRoleRow row : rows) {
-            if (row.expiration().toEpochMilli() > now) {
-                targetMap.put(row.identifier(), new TemporaryRoleEntry(
-                        row.roleName(), row.expiration(), row.fallbackRole()
-                ));
-                continue;
-            }
+            for (TemporaryRoleRow row : rows) {
+                if (row.expiration().toEpochMilli() > now) {
+                    targetMap.put(row.identifier(), new TemporaryRoleEntry(
+                            row.roleName(), row.expiration(), row.fallbackRole()
+                    ));
+                    continue;
+                }
 
                 if (revertExpiredTemporaryRole(conn, row)) {
                     deleteTemporaryRole(conn, row.identifier());
@@ -409,7 +427,8 @@ public final class DatabasePermissionsHelper {
             return true;
         } catch (SQLException e) {
             DebugType.Multiplayer.printException(
-                    e, "Failed to revert expired temporary role for user '" + row.identifier() + "'", LogSeverity.Error);
+                    e, "Failed to revert expired temporary role for user '" + row.identifier() + "'",
+                    LogSeverity.Error);
             return false;
         }
     }
@@ -573,8 +592,8 @@ public final class DatabasePermissionsHelper {
 
             // Load remaining active permissions
             try (Statement stat = conn.createStatement();
-                 ResultSet rs = stat.executeQuery(
-                         "SELECT identifier, node, expiration FROM player_permissions")) {
+                    ResultSet rs = stat.executeQuery(
+                            "SELECT identifier, node, expiration FROM player_permissions")) {
                 while (rs.next()) {
                     String identifier = PermissionsManager.normalizeIdentifier(rs.getString("identifier"));
                     String node = rs.getString("node");
@@ -603,8 +622,12 @@ public final class DatabasePermissionsHelper {
      * @return the resolved role ID from DB, or -1 if not found
      */
     private static int resolveRoleId(Connection conn, Role role) {
-        if (role == null || role.getName() == null) return -1;
-        if (role.getId() > 0) return role.getId();
+        if (role == null || role.getName() == null) {
+            return -1;
+        }
+        if (role.getId() > 0) {
+            return role.getId();
+        }
 
         DATABASE_LOCK.lock();
         try (PreparedStatement stat = conn.prepareStatement("SELECT id FROM role WHERE name = ? COLLATE NOCASE")) {
@@ -617,7 +640,8 @@ public final class DatabasePermissionsHelper {
                 }
             }
         } catch (SQLException e) {
-            DebugType.Multiplayer.printException(e, "Failed to resolve role ID for: " + role.getName(), LogSeverity.Error);
+            DebugType.Multiplayer.printException(
+                    e, "Failed to resolve role ID for: " + role.getName(), LogSeverity.Error);
         } finally {
             DATABASE_LOCK.unlock();
         }
@@ -680,7 +704,8 @@ public final class DatabasePermissionsHelper {
     ) throws SQLException {
         // Force update base role table (bypassing PZ's 'readonly = false' lock)
         try (PreparedStatement stat = conn.prepareStatement(
-                "UPDATE role SET description = ?, colorR = ?, colorG = ?, colorB = ?, prefix = ?, suffix = ? WHERE id = ?")) {
+                "UPDATE role SET description = ?, colorR = ?, colorG = ?, colorB = ?, "
+                        + "prefix = ?, suffix = ? WHERE id = ?")) {
             stat.setString(1, role.getDescription() != null ? role.getDescription() : "");
             stat.setFloat(2, role.getColor() != null ? role.getColor().r : 1.0f);
             stat.setFloat(3, role.getColor() != null ? role.getColor().g : 1.0f);
@@ -803,8 +828,12 @@ public final class DatabasePermissionsHelper {
                     if (rs.next()) {
                         String prefix = rs.getString("prefix");
                         String suffix = rs.getString("suffix");
-                        if (prefix != null) role.setPrefix(prefix);
-                        if (suffix != null) role.setSuffix(suffix);
+                        if (prefix != null) {
+                            role.setPrefix(prefix);
+                        }
+                        if (suffix != null) {
+                            role.setSuffix(suffix);
+                        }
                     }
                 }
             }
@@ -836,7 +865,8 @@ public final class DatabasePermissionsHelper {
             }
 
             // Load metadata
-            try (PreparedStatement stat = conn.prepareStatement("SELECT meta_key, meta_val FROM role_metadata WHERE role = ?")) {
+            try (PreparedStatement stat = conn.prepareStatement(
+                    "SELECT meta_key, meta_val FROM role_metadata WHERE role = ?")) {
                 stat.setInt(1, roleId);
                 try (ResultSet rs = stat.executeQuery()) {
                     while (rs.next()) {
@@ -849,7 +879,8 @@ public final class DatabasePermissionsHelper {
                 }
             }
         } catch (SQLException e) {
-            DebugType.Multiplayer.printException(e, "Failed to load extended data for role: " + role.getName(), LogSeverity.Error);
+            DebugType.Multiplayer.printException(
+                    e, "Failed to load extended data for role: " + role.getName(), LogSeverity.Error);
         } finally {
             DATABASE_LOCK.unlock();
         }
@@ -863,7 +894,9 @@ public final class DatabasePermissionsHelper {
      * @return {@code true} if the extended role data was deleted
      */
     public static boolean deleteCustomRoleData(Connection conn, int roleId) {
-        if (conn == null || roleId <= 0) return false;
+        if (conn == null || roleId <= 0) {
+            return false;
+        }
 
         DATABASE_LOCK.lock();
         try {
