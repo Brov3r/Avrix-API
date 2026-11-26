@@ -1,4 +1,4 @@
-schema: 1
+schema: 2
 name: "Avrix-API"
 description: "Project Zomboid API"
 id: "avrix-api"
@@ -10,23 +10,25 @@ license: "MIT"
 contacts:
   - "https://github.com/Brov3r/Avrix-API"
 dependencies:
-  avrix-loader: ">=2.5.0"
+  avrix-loader: ">=2.6.0"
   project-zomboid: ">=42.22"
-entrypoint: ""
 mixins:
   # Common: active on both client and dedicated server.
-  - "com.avrix.api.mixins.common.LuaManagerMixin"
-  - "com.avrix.api.mixins.common.LuaEventManagerMixin"
-  - "com.avrix.api.mixins.common.LuaRequireMixin"
-  - "com.avrix.api.mixins.common.PacketReceiveMixin"
+  common:
+    - "com.avrix.api.mixins.common.LuaManagerMixin"
+    - "com.avrix.api.mixins.common.LuaEventManagerMixin"
+    - "com.avrix.api.mixins.common.LuaRequireMixin"
+    - "com.avrix.api.mixins.common.PacketReceiveMixin"
   # Client-only rendering and input hooks.
-  - "com.avrix.api.mixins.client.DisplayMixin"
-  - "com.avrix.api.mixins.client.GameKeyboardMixin"
-  - "com.avrix.api.mixins.client.MouseMixin"
-  - "com.avrix.api.mixins.client.UIManagerMixin"
+  client:
+    - "com.avrix.api.mixins.client.DisplayMixin"
+    - "com.avrix.api.mixins.client.GameKeyboardMixin"
+    - "com.avrix.api.mixins.client.MouseMixin"
+    - "com.avrix.api.mixins.client.UIManagerMixin"
   # Server-only game systems.
-  - "com.avrix.api.mixins.server.GameServerEventsMixin"
-  - "com.avrix.api.mixins.server.GameServerCommandsMixin"
-  - "com.avrix.api.mixins.server.GameServerPermissionsMixin"
-  - "com.avrix.api.mixins.server.RolesMixin"
-  - "com.avrix.api.mixins.server.ServerWorldDatabaseMixin"
+  server:
+    - "com.avrix.api.mixins.server.GameServerEventsMixin"
+    - "com.avrix.api.mixins.server.GameServerCommandsMixin"
+    - "com.avrix.api.mixins.server.GameServerPermissionsMixin"
+    - "com.avrix.api.mixins.server.RolesMixin"
+    - "com.avrix.api.mixins.server.ServerWorldDatabaseMixin"
