@@ -114,9 +114,17 @@ def gameJarFiles = providers.provider {
 
 repositories {
     mavenCentral()
+    maven { url = uri('https://jitpack.io') }
 }
 
 dependencies {
+    // LixUI renders the client overlay. LWJGL and SLF4J are supplied by Project Zomboid
+    // and the loader, so only the framework itself is bundled into the plugin JAR.
+    implementation('com.github.Brov3r:LixUI:v1.0.0') {
+        exclude group: 'org.lwjgl'
+        exclude group: 'org.slf4j'
+    }
+
     // The Avrix loader and Project Zomboid are supplied by the runtime, so they are
     // required for compilation and tests only and must never be bundled into the plugin.
     compileOnly(fileTree(
@@ -256,6 +264,8 @@ tasks.named('shadowJar', ShadowJar) {
     exclude 'META-INF/INDEX.LIST'
     exclude 'module-info.class'
     exclude 'META-INF/versions/*/module-info.class'
+    // LixUI ships standalone demo applications that are not part of the plugin.
+    exclude 'com/lixui/demo/**'
 
     manifest {
         attributes(

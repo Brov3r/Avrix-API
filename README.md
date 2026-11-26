@@ -18,7 +18,7 @@ interfaces, contracts and services for Avrix plugins.
 
 ## 🚀 Quick Start
 
-1. Install the [Avrix Loader](https://github.com/Brov3r/Avrix) `2.4.0+`.
+1. Install the [Avrix Loader](https://github.com/Brov3r/Avrix) `2.5+`.
 2. Download `Avrix-API-<version>.jar` from the [Releases Page](https://github.com/Brov3r/Avrix-API/releases).
 3. Place it into the `plugins/` directory of your Project Zomboid installation.
 4. Launch the game or dedicated server through the loader.

@@ -11,7 +11,7 @@ contacts:
   - "https://github.com/Brov3r/Avrix-API"
 dependencies:
   avrix-loader: ">=2.5.0"
-  project-zomboid: ">=42.21"
+  project-zomboid: ">=42.22"
 entrypoint: ""
 mixins:
   # Common: active on both client and dedicated server.
@@ -19,6 +19,11 @@ mixins:
   - "com.avrix.api.mixins.common.LuaEventManagerMixin"
   - "com.avrix.api.mixins.common.LuaRequireMixin"
   - "com.avrix.api.mixins.common.PacketReceiveMixin"
+  # Client-only rendering and input hooks.
+  - "com.avrix.api.mixins.client.DisplayMixin"
+  - "com.avrix.api.mixins.client.GameKeyboardMixin"
+  - "com.avrix.api.mixins.client.MouseMixin"
+  - "com.avrix.api.mixins.client.UIManagerMixin"
   # Server-only game systems.
   - "com.avrix.api.mixins.server.GameServerEventsMixin"
   - "com.avrix.api.mixins.server.GameServerCommandsMixin"

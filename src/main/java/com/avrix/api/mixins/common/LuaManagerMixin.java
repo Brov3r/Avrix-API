@@ -6,6 +6,7 @@ import org.spongepowered.asm.mixin.Mixin;
 import org.spongepowered.asm.mixin.injection.At;
 import org.spongepowered.asm.mixin.injection.Inject;
 import org.spongepowered.asm.mixin.injection.callback.CallbackInfo;
+import org.spongepowered.asm.mixin.injection.callback.CallbackInfoReturnable;
 import zombie.Lua.LuaManager;
 
 /**
@@ -81,7 +82,7 @@ public class LuaManagerMixin {
             method = "RunLua(Ljava/lang/String;)Ljava/lang/Object;",
             at = @At("HEAD")
     )
-    private static void trackLuaFile(String filename, CallbackInfo callback) {
+    private static void trackLuaFile(String filename, CallbackInfoReturnable<Object> callback) {
         LuaScriptLoader.onLuaFileLoaded(filename);
     }
 }

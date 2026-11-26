@@ -4,8 +4,8 @@
 
 This documentation is relevant for the following versions:
 
-- 🧟 **Project Zomboid:** `42.21+`
-- ⚡ **Avrix Loader:** `2.4.0+`
+- 🧟 **Project Zomboid:** `42.22+`
+- ⚡ **Avrix Loader:** `2.5+`
 - ☕ **Java Runtime:** `JDK 25+`
 
 ---
@@ -15,6 +15,7 @@ This documentation is relevant for the following versions:
 - [🏃 Game Events](wiki-events.md)
 - [🌐 Network API](wiki-network.md)
 - [🧰 Utility API](wiki-utils.md)
+- [🖥️ UI API](wiki-ui.md)
 - [📜 Lua Scripts](wiki-lua.md)
 - [💬 Chat/console commands](wiki-commands.md)
 - [🛡️ Role and Permissions](wiki-permissions.md)
